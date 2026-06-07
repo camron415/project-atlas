@@ -1,0 +1,11 @@
+{
+  "name": "atlas-stream-audio",
+  "version": "1.0.0",
+  "description": "Gapless PCM16 streaming playback via AVAudioEngine for Atlas",
+  "main": "index.ts",
+  "peerDependencies": {
+    "expo": "*",
+    "react": "*",
+    "react-native": "*"
+  }
+}

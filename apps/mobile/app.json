@@ -1,0 +1,34 @@
+{
+  "expo": {
+    "name": "Atlas",
+    "slug": "atlas",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "scheme": "atlas",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#0b0f17"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.camrontrost.atlas",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "Atlas needs microphone access so you can speak to it using push-to-talk.",
+        "NSSpeechRecognitionUsageDescription": "Atlas uses speech recognition to understand your spoken questions.",
+        "UIBackgroundModes": ["audio"],
+        "NSAppTransportSecurity": {
+          "NSAllowsLocalNetworking": true
+        }
+      }
+    },
+    "android": {
+      "package": "com.camrontrost.atlas",
+      "edgeToEdgeEnabled": true,
+      "usesCleartextTraffic": true,
+      "permissions": ["RECORD_AUDIO"]
+    },
+    "plugins": ["expo-speech-recognition"]
+  }
+}

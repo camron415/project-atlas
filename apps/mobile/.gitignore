@@ -1,0 +1,17 @@
+# Expo / RN
+node_modules/
+.expo/
+dist/
+web-build/
+
+# Native (Expo prebuild output — not the atlas-stream-audio module sources)
+/ios/
+/android/
+
+# Env
+.env
+.env.local
+
+# Misc
+*.log
+.DS_Store

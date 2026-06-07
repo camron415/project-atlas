@@ -1,0 +1,6 @@
+{
+  "lanIp": "10.0.0.84",
+  "serverPort": 8787,
+  "serverUrl": "http://10.0.0.84:8787",
+  "healthUrl": "http://10.0.0.84:8787/health"
+}
