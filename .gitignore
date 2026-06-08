@@ -6,5 +6,6 @@ server/data/*.db
 server/data/*.db-shm
 server/data/*.db-wal
 server/data/screenshots/
+server/data/transcripts.jsonl
 .DS_Store
 *.log

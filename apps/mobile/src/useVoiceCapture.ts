@@ -1,5 +1,5 @@
 /**
- * Voice capture with VocalLearn-style auto-send on pause.
+ * Voice capture — adaptive end-of-speech (ChatGPT-style longer pause tolerance).
  */
 import { useCallback, useEffect, useRef } from "react";
 import {
@@ -9,12 +9,10 @@ import {
   stopListening,
 } from "./speech";
 import { dlog } from "./log";
+import { computeSilenceSubmitMs, LISTEN_WATCHDOG_MS } from "./voice-endpoint";
 
-const SILENCE_SUBMIT_MS = 900;
-const SHORT_UTTERANCE_GRACE_MS = 1400;
 const IGNORE_END_MS = 900;
 const IGNORE_ERROR_MS = 800;
-const LISTEN_WATCHDOG_MS = 45_000;
 
 const IGNORABLE_MIC_ERRORS = new Set([
   "aborted",
@@ -63,7 +61,7 @@ export function useVoiceCapture(options: VoiceCaptureOptions) {
 
   const forceSubmitRef = useRef<(text?: string) => Promise<void>>(async () => {});
   const restartMicRef = useRef<() => Promise<void>>(async () => {});
-  const scheduleSubmitRef = useRef<(delayMs: number) => void>(() => {});
+  const scheduleSubmitRef = useRef<(text: string) => void>(() => {});
 
   const notifyCaptureEnd = () => {
     optionsRef.current.onCaptureEnd?.();
@@ -86,7 +84,7 @@ export function useVoiceCapture(options: VoiceCaptureOptions) {
     clearSilenceTimer();
     clearWatchdog();
     ignoreErrorUntilRef.current = Date.now() + IGNORE_ERROR_MS;
-    dlog("stt", `auto-submit "${text.slice(0, 60)}"`);
+    dlog("stt", `auto-submit "${text.slice(0, 80)}"`);
 
     try {
       await stopListening();
@@ -98,8 +96,10 @@ export function useVoiceCapture(options: VoiceCaptureOptions) {
 
   forceSubmitRef.current = forceSubmit;
 
-  const scheduleSubmit = useCallback((delayMs: number) => {
+  const scheduleSubmit = useCallback((text: string) => {
+    const delayMs = computeSilenceSubmitMs(text);
     clearSilenceTimer();
+    dlog("stt", `silence timer ${delayMs}ms (${text.trim().split(/\s+/).filter(Boolean).length} words)`);
     silenceTimerRef.current = setTimeout(() => {
       void forceSubmitRef.current();
     }, delayMs);
@@ -130,6 +130,7 @@ export function useVoiceCapture(options: VoiceCaptureOptions) {
     clearWatchdog();
     watchdogRef.current = setTimeout(() => {
       watchdogRef.current = null;
+      dlog("stt", "watchdog auto-submit (max listen duration)");
       void forceSubmitRef.current();
     }, LISTEN_WATCHDOG_MS);
   };
@@ -138,22 +139,15 @@ export function useVoiceCapture(options: VoiceCaptureOptions) {
     transcriptRef.current = text;
     optionsRef.current.onPartial(text);
 
-    if (isFinal) {
-      const words = text.trim().split(/\s+/).filter(Boolean).length;
-      if (words >= 4) {
-        void forceSubmitRef.current();
-      } else {
-        lastScheduledTextRef.current = text;
-        scheduleSubmitRef.current(SHORT_UTTERANCE_GRACE_MS);
-      }
-      return;
+    // Never instant-send on iOS "final" segments — only sustained silence sends.
+    // Finals often fire mid-sentence when you pause to think.
+    if (text !== lastScheduledTextRef.current || !silenceTimerRef.current) {
+      lastScheduledTextRef.current = text;
+      scheduleSubmitRef.current(text);
     }
 
-    if (text !== lastScheduledTextRef.current) {
-      lastScheduledTextRef.current = text;
-      scheduleSubmitRef.current(SILENCE_SUBMIT_MS);
-    } else if (!silenceTimerRef.current) {
-      scheduleSubmitRef.current(SILENCE_SUBMIT_MS);
+    if (isFinal) {
+      dlog("stt", `segment final (${text.trim().split(/\s+/).filter(Boolean).length} words) — waiting for silence`);
     }
   };
 
@@ -162,7 +156,7 @@ export function useVoiceCapture(options: VoiceCaptureOptions) {
     ignoreEndUntilRef.current = Date.now() + IGNORE_END_MS;
     ignoreErrorUntilRef.current = Date.now() + IGNORE_ERROR_MS;
     try {
-      await startListening({ continuous: false });
+      await startListening({ continuous: true });
       listenStartInFlightRef.current = false;
       ignoreEndUntilRef.current = Date.now() + IGNORE_END_MS;
       ignoreErrorUntilRef.current = Date.now() + IGNORE_ERROR_MS;
@@ -187,7 +181,7 @@ export function useVoiceCapture(options: VoiceCaptureOptions) {
       ignoreEndUntilRef.current = Date.now() + IGNORE_END_MS;
       ignoreErrorUntilRef.current = Date.now() + IGNORE_ERROR_MS;
       softStopRecognition();
-      await startListening({ continuous: false });
+      await startListening({ continuous: true });
       listenStartInFlightRef.current = false;
       ignoreEndUntilRef.current = Date.now() + IGNORE_END_MS;
       ignoreErrorUntilRef.current = Date.now() + IGNORE_ERROR_MS;
@@ -233,7 +227,8 @@ export function useVoiceCapture(options: VoiceCaptureOptions) {
 
     const text = getTranscript();
     if (text) {
-      void forceSubmitRef.current();
+      // Session paused — wait adaptive silence; don't cut off on a brief end event.
+      scheduleSubmitRef.current(text);
       return;
     }
 
@@ -256,8 +251,9 @@ export function useVoiceCapture(options: VoiceCaptureOptions) {
       Date.now() < ignoreErrorUntilRef.current
     ) {
       if (code === "no-speech" && !submittedRef.current) {
-        if (getTranscript()) {
-          void forceSubmitRef.current();
+        const text = getTranscript();
+        if (text) {
+          scheduleSubmitRef.current(text);
         } else if (activeRef.current) {
           void restartMicRef.current();
         }
@@ -293,4 +289,4 @@ export function useVoiceCapture(options: VoiceCaptureOptions) {
     onSpeechEnd,
     onSpeechError,
   };
-}
+};

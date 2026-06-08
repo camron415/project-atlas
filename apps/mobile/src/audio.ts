@@ -1,8 +1,7 @@
-// Playback for the base64 MP3 that the Atlas server returns from /chat/voice.
-// Pattern adapted from VocalLearn's src/lib/voice.ts (Ara TTS playback).
+// Playback for the base64 MP3 that the Atlas server returns from /tts.
 import { Audio } from "expo-av";
 import { File, Paths } from "expo-file-system";
-import { resetAudioForPlayback } from "./speech";
+import { prepareAudiblePlayback } from "./speech";
 
 let currentSound: Audio.Sound | null = null;
 let currentFile: File | null = null;
@@ -55,7 +54,6 @@ function cleanupFile(): void {
   }
 }
 
-/** Stop and unload any audio that is currently playing. */
 export async function stopPlayback(): Promise<void> {
   if (currentSound) {
     try {
@@ -67,19 +65,12 @@ export async function stopPlayback(): Promise<void> {
   cleanupFile();
 }
 
-/**
- * Decode a base64 MP3 and play it through the speaker. Resolves when playback
- * finishes (or fails). `onStart` fires the moment audio begins.
- */
 export async function playBase64Mp3(
   base64: string,
   onStart?: () => void,
 ): Promise<void> {
   await stopPlayback();
-
-  // Force the iOS session into playback/speaker mode. Without this, audio can
-  // route to the earpiece after a recording (STT) session.
-  await resetAudioForPlayback();
+  await prepareAudiblePlayback();
 
   const bytes = decodeBase64ToBytes(base64);
   const file = new File(Paths.cache, `atlas_${Date.now()}.mp3`);
@@ -87,9 +78,11 @@ export async function playBase64Mp3(
   file.write(bytes);
   currentFile = file;
 
-  const { sound } = await Audio.Sound.createAsync({ uri: file.uri });
+  const { sound } = await Audio.Sound.createAsync(
+    { uri: file.uri },
+    { shouldPlay: false, volume: 1.0, isMuted: false },
+  );
   currentSound = sound;
-  await sound.setVolumeAsync(1.0);
 
   return new Promise<void>((resolve) => {
     let settled = false;

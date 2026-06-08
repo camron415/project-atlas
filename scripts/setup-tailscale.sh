@@ -56,19 +56,32 @@ if [[ ! "${TS_IP}" =~ ^100\. ]]; then
 fi
 
 ATLAS_URL="http://${TS_IP}:${ATLAS_PORT}"
+LAN_URL="http://10.0.0.84:${ATLAS_PORT}"
+TS_HOST=""
+TAILNET=""
+if command -v tailscale >/dev/null 2>&1; then
+  TS_HOST="$(tailscale status --json 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin).get('Self',{}).get('DNSName','').rstrip('.'))" 2>/dev/null || true)"
+  TAILNET="$(tailscale status --json 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin).get('MagicDNSSuffix',''))" 2>/dev/null || true)"
+fi
+if [[ -n "${TS_HOST}" ]]; then
+  MAGIC_URL="http://${TS_HOST}:${ATLAS_PORT}"
+  ATLAS_URLS="${MAGIC_URL},${LAN_URL},${ATLAS_URL}"
+else
+  ATLAS_URLS="${ATLAS_URL},${LAN_URL}"
+fi
 echo ""
-echo "3. Atlas server URL: ${ATLAS_URL}"
+echo "3. Atlas server URLs: ${ATLAS_URLS}"
 
-# Mobile client — Tailscale works at home AND away (single URL).
+# Mobile client — LAN + Tailscale (auto-picks first that responds).
 if [[ -f "${MOBILE_ENV}" ]]; then
   if grep -q '^EXPO_PUBLIC_ATLAS_SERVER_URL=' "${MOBILE_ENV}"; then
-    sed -i '' "s|^EXPO_PUBLIC_ATLAS_SERVER_URL=.*|EXPO_PUBLIC_ATLAS_SERVER_URL=${ATLAS_URL}|" "${MOBILE_ENV}"
+    sed -i '' "s|^EXPO_PUBLIC_ATLAS_SERVER_URL=.*|EXPO_PUBLIC_ATLAS_SERVER_URL=${ATLAS_URLS}|" "${MOBILE_ENV}"
   else
     echo "EXPO_PUBLIC_ATLAS_SERVER_URL=${ATLAS_URL}" >> "${MOBILE_ENV}"
   fi
   echo "   Updated ${MOBILE_ENV}"
 else
-  echo "EXPO_PUBLIC_ATLAS_SERVER_URL=${ATLAS_URL}" > "${MOBILE_ENV}"
+  echo "EXPO_PUBLIC_ATLAS_SERVER_URL=${ATLAS_URLS}" > "${MOBILE_ENV}"
   echo "   Created ${MOBILE_ENV}"
 fi
 

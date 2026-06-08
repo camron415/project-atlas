@@ -1,5 +1,5 @@
 // On-device speech-to-text — toggle mic stays open until user taps again.
-import { Audio } from "expo-av";
+import { Audio, InterruptionModeIOS } from "expo-av";
 import { Platform } from "react-native";
 import {
   ExpoSpeechRecognitionModule,
@@ -9,6 +9,50 @@ import { dlog } from "./log";
 
 export interface ListenOptions {
   continuous?: boolean;
+}
+
+let audibleModeReady = false;
+
+/** Call once at app launch so silent-mode playback is allowed globally. */
+export async function initAudibleAudioMode(): Promise<void> {
+  if (audibleModeReady) return;
+  await Audio.setAudioModeAsync({
+    allowsRecordingIOS: false,
+    playsInSilentModeIOS: true,
+    staysActiveInBackground: false,
+    interruptionModeIOS: InterruptionModeIOS.DoNotMix,
+    interruptionModeAndroid: 1,
+    shouldDuckAndroid: false,
+    playThroughEarpieceAndroid: false,
+  });
+  audibleModeReady = true;
+}
+
+/** Prepare session immediately before TTS / MP3 playback (silent switch ON). */
+export async function prepareAudiblePlayback(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 80));
+
+  if (Platform.OS === "ios") {
+    try {
+      ExpoSpeechRecognitionModule.setCategoryIOS({
+        category: "playback",
+        categoryOptions: [],
+        mode: "spokenAudio",
+      });
+    } catch (e) {
+      dlog("audio", "setCategoryIOS playback skipped:", e);
+    }
+  }
+
+  await Audio.setAudioModeAsync({
+    allowsRecordingIOS: false,
+    playsInSilentModeIOS: true,
+    staysActiveInBackground: false,
+    interruptionModeIOS: InterruptionModeIOS.DoNotMix,
+    interruptionModeAndroid: 1,
+    shouldDuckAndroid: false,
+    playThroughEarpieceAndroid: false,
+  });
 }
 
 export async function ensureSpeechReady(): Promise<void> {
@@ -26,7 +70,6 @@ export async function ensureSpeechReady(): Promise<void> {
 export async function startListening(options: ListenOptions = {}): Promise<void> {
   await ensureSpeechReady();
 
-  // Clear orphaned session — use stop only (abort fires a spurious "aborted" error on iOS).
   try {
     ExpoSpeechRecognitionModule.stop();
   } catch {}
@@ -44,7 +87,10 @@ export async function startListening(options: ListenOptions = {}): Promise<void>
     allowsRecordingIOS: true,
     playsInSilentModeIOS: true,
     staysActiveInBackground: false,
+    interruptionModeIOS: InterruptionModeIOS.MixWithOthers,
+    interruptionModeAndroid: 1,
     shouldDuckAndroid: false,
+    playThroughEarpieceAndroid: false,
   });
 
   dlog("stt", "start (playAndRecord)");
@@ -60,29 +106,33 @@ export async function startListening(options: ListenOptions = {}): Promise<void>
   });
 }
 
-export async function resetAudioForPlayback(): Promise<void> {
-  // Brief wait for native STT engine to finish its audio session cleanup.
-  await new Promise((resolve) => setTimeout(resolve, 100));
-
+/** After STT — hand off to AVAudioEngine (no expo-av playback prep / delay). */
+export async function prepareForNativeStream(): Promise<void> {
   if (Platform.OS === "ios") {
     try {
-      // defaultToSpeaker is ONLY valid with playAndRecord — using it with
-      // playback throws OSStatus -50 (paramErr) from setCategoryIOS.
       ExpoSpeechRecognitionModule.setCategoryIOS({
-        category: "playback",
-        categoryOptions: [],
-        mode: "default",
+        category: "playAndRecord",
+        categoryOptions: ["defaultToSpeaker", "allowBluetooth"],
+        mode: "spokenAudio",
       });
     } catch (e) {
-      dlog("audio", "setCategoryIOS playback skipped:", e);
+      dlog("audio", "prepareForNativeStream setCategoryIOS skipped:", e);
     }
   }
+
   await Audio.setAudioModeAsync({
     allowsRecordingIOS: false,
     playsInSilentModeIOS: true,
     staysActiveInBackground: false,
+    interruptionModeIOS: InterruptionModeIOS.DoNotMix,
+    interruptionModeAndroid: 1,
     shouldDuckAndroid: false,
+    playThroughEarpieceAndroid: false,
   });
+}
+
+export async function resetAudioForPlayback(): Promise<void> {
+  await prepareAudiblePlayback();
 }
 
 export function softStopRecognition(): void {
@@ -93,7 +143,7 @@ export function softStopRecognition(): void {
 
 export async function stopListening(): Promise<void> {
   softStopRecognition();
-  await resetAudioForPlayback();
+  await prepareForNativeStream();
 }
 
 export function abortListening(): void {

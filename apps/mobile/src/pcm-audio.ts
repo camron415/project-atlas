@@ -161,7 +161,7 @@ function playClip(clip: PreparedClip, onStart?: () => void): Promise<void> {
 }
 
 export interface StreamingPcmPlayback {
-  appendBase64Chunk: (base64Chunk: string) => void;
+  appendBase64Chunk: (base64Chunk: string) => void | Promise<void>;
   finish: () => Promise<void>;
   completion: Promise<void>;
   abort: () => void;

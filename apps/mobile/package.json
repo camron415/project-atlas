@@ -5,10 +5,16 @@
   "main": "index.ts",
   "scripts": {
     "start": "expo start",
+    "start:dev-client": "expo start --dev-client --host lan",
+    "start:remote": "bash ../../scripts/start-mobile-remote.sh",
     "ios": "expo run:ios",
     "ios:device": "expo run:ios --device",
+    "ios:device:remote": "bash ../../scripts/rebuild-ios-remote.sh",
+    "ios:release": "bash ../../scripts/build-ios-release.sh",
     "android": "expo run:android",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:audio": "npx tsx src/turn-audio-policy.test.ts",
+    "test:voice": "npx tsx src/voice-endpoint.test.ts"
   },
   "dependencies": {
     "atlas-stream-audio": "file:./modules/atlas-stream-audio",
@@ -16,6 +22,7 @@
     "expo-av": "~16.0.8",
     "expo-file-system": "~19.0.21",
     "expo-haptics": "~15.0.8",
+    "expo-location": "~19.0.8",
     "expo-speech": "~14.0.8",
     "expo-speech-recognition": "^3.1.2",
     "expo-status-bar": "~3.0.9",

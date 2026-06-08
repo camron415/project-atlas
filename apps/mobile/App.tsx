@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  AppState,
+  FlatList,
   KeyboardAvoidingView,
+  ListRenderItem,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -26,16 +28,28 @@ import {
 } from "./src/api";
 import { playBase64Mp3, stopPlayback } from "./src/audio";
 import { stopStreamingPlayback } from "./src/stream-audio";
-import { ATLAS_SERVER_URL } from "./src/config";
-import { dlog } from "./src/log";
+import { ATLAS_SERVER_URL, getResolvedServerUrl } from "./src/config";
+import { getLastResolveError } from "./src/api";
+import { dlog, dwarn } from "./src/log";
+import { getLocationContext } from "./src/location";
 import { abortRealtime, runRealtimeTurn } from "./src/realtime";
-import { useSpeechRecognitionEvent } from "./src/speech";
+import {
+  initAudibleAudioMode,
+  prepareForNativeStream,
+  resetAudioForPlayback,
+  useSpeechRecognitionEvent,
+} from "./src/speech";
+import { recordTranscript } from "./src/transcript";
+import { speakAtlasReply } from "./src/speak-reply";
 import { useVoiceCapture } from "./src/useVoiceCapture";
 
 // Phrase triggers that opt a single turn into the slower reasoning model.
 const DEEP_INTENT = /\b(think (deeply|hard|carefully)|deep dive|deep[- ]?think|take your time|really think|think it through)\b/i;
 // Phrases that should force a fresh project rescan before answering.
 const REFRESH_INTENT = /\b(latest|refresh|re-?scan|up to date|most recent|current status|what's new|whats new|review (the )?code|scan (my )?projects|what context|what do you know|deep scan|read (my )?repos)\b/i;
+// Phrases that trigger web search, lookups, or other slow research.
+const RESEARCH_INTENT =
+  /\b(search (the )?(web|internet)|look (it )?up|google|weather|forecast|news|headlines|current events|what(?:'s| is) (the |happening|going on)|find (out|me)|on the web|online|browse|tell me about (the )?(latest|news|weather))\b/i;
 
 function looksDeep(text: string): boolean {
   return DEEP_INTENT.test(text);
@@ -43,6 +57,10 @@ function looksDeep(text: string): boolean {
 
 function looksRefresh(text: string): boolean {
   return REFRESH_INTENT.test(text);
+}
+
+function looksResearch(text: string): boolean {
+  return RESEARCH_INTENT.test(text);
 }
 
 type Role = "user" | "atlas";
@@ -57,16 +75,29 @@ interface Message {
 type Status = "idle" | "listening" | "thinking" | "speaking";
 type Connection = "unknown" | "online" | "offline";
 
+/** Bumped each release — confirm in app header after install. */
+const APP_BUILD_STAMP = "2026-06-08-voice";
+
 function makeId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 const STATUS_LABEL: Record<Status, string> = {
   idle: "Tap mic to speak",
-  listening: "Listening… pause when done",
+  listening: "Listening… take your time",
   thinking: "Tap to interrupt",
   speaking: "Tap to interrupt",
 };
+
+/** Keep UI responsive; full history lives in transcript logs. */
+const MAX_UI_MESSAGES = 80;
+
+function toChatTurn(msg: Message): ChatTurn {
+  return {
+    role: msg.role === "atlas" ? "assistant" : "user",
+    content: msg.text,
+  };
+}
 
 function AtlasApp() {
   const insets = useSafeAreaInsets();
@@ -77,9 +108,12 @@ function AtlasApp() {
   const [connection, setConnection] = useState<Connection>("unknown");
   const [draft, setDraft] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
+  const [audioDiag, setAudioDiag] = useState<string | null>(null);
   const [deepMode, setDeepMode] = useState(false);
+  const [activeServer, setActiveServer] = useState(ATLAS_SERVER_URL);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
 
-  const scrollRef = useRef<ScrollView>(null);
+  const listRef = useRef<FlatList<Message>>(null);
   const messagesRef = useRef<Message[]>([]);
   const statusRef = useRef<Status>("idle");
   const activeRequestRef = useRef<AbortController | null>(null);
@@ -91,55 +125,100 @@ function AtlasApp() {
   /** True while user wants continuous voice mode (tap once, keep talking). */
   const micSessionRef = useRef(false);
 
-  messagesRef.current = messages;
   statusRef.current = status;
   partialRef.current = partial;
   deepModeRef.current = deepMode;
 
-  const refreshHealth = useCallback(async () => {
-    try {
-      const health = await checkHealth();
-      setConnection(health.ok ? "online" : "offline");
-    } catch {
-      setConnection("offline");
+  const pushMessage = useCallback((msg: Message) => {
+    let next = [...messagesRef.current, msg];
+    if (next.length > MAX_UI_MESSAGES) {
+      next = next.slice(-MAX_UI_MESSAGES);
+    }
+    messagesRef.current = next;
+    setMessages(next);
+    if (!msg.error) {
+      void recordTranscript(msg.role, msg.text);
     }
   }, []);
 
-  const loadChiefSession = useCallback(async () => {
+  const connectToServer = useCallback(async () => {
+    setConnectionError(null);
     try {
-      const session = await fetchChiefSession();
-      instructionsRef.current = session.instructions;
-      voiceRef.current = session.voice || "rex";
+      const health = await checkHealth(true);
+      setActiveServer(getResolvedServerUrl() ?? health.url ?? ATLAS_SERVER_URL);
       setConnection("online");
-    } catch {
+
+      try {
+        const session = await fetchChiefSession();
+        instructionsRef.current = session.instructions;
+        voiceRef.current = session.voice || "rex";
+      } catch (error) {
+        dwarn("session", "chief instructions failed after health ok", error);
+      }
+      void getLocationContext().catch(() => {});
+    } catch (error) {
       setConnection("offline");
+      setConnectionError(
+        getLastResolveError() ??
+          (error instanceof Error ? error.message : "Atlas server unreachable"),
+      );
     }
+  }, []);
+
+  const refreshHealth = useCallback(() => connectToServer(), [connectToServer]);
+
+  const loadChiefSession = useCallback(async () => {
+    const session = await fetchChiefSession();
+    instructionsRef.current = session.instructions;
+    voiceRef.current = session.voice || "rex";
   }, []);
 
   useEffect(() => {
-    refreshHealth();
-    loadChiefSession();
-  }, [refreshHealth, loadChiefSession]);
+    void initAudibleAudioMode();
+    connectToServer();
+  }, [connectToServer]);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (state) => {
+      // Don't re-probe the server mid-turn — it can disrupt the audio session.
+      if (state !== "active") return;
+      const busy = statusRef.current !== "idle";
+      if (busy) return;
+      connectToServer();
+    });
+    return () => sub.remove();
+  }, [connectToServer]);
 
   const scrollToEnd = useCallback(() => {
-    requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
+    requestAnimationFrame(() => {
+      listRef.current?.scrollToEnd({ animated: true });
+    });
   }, []);
+
+  useEffect(() => {
+    scrollToEnd();
+  }, [messages, streamingAtlas, partial, status, scrollToEnd]);
 
   const cancelActiveRequest = useCallback(() => {
     activeRequestRef.current?.abort();
     activeRequestRef.current = null;
   }, []);
 
-  // Fast path: realtime text + native PCM stream (AVAudioEngine on iOS).
+  // Fast path: Grok-style AVAudioEngine PCM stream; TTS only if PCM never reached the engine.
   const runFastTurn = useCallback(
     async (
       clean: string,
       history: ChatTurn[],
       interrupted: boolean,
       controller: AbortController,
+      afterHoldPhrase: boolean,
     ) => {
       const secret = await fetchRealtimeClientSecret();
-      setStatus("speaking");
+      setStatus("thinking");
+      setAudioDiag(null);
+      await stopStreamingPlayback();
+      await stopPlayback();
+      await prepareForNativeStream();
 
       const result = await runRealtimeTurn({
         clientSecret: secret.value,
@@ -148,8 +227,13 @@ function AtlasApp() {
         history,
         userMessage: clean,
         interrupted,
+        afterHoldPhrase,
         voice: voiceRef.current,
+        textOnly: false,
         signal: controller.signal,
+        onFirstAudio: () => {
+          if (!controller.signal.aborted) setStatus("speaking");
+        },
         onTextDelta: (delta) => {
           setStreamingAtlas(delta);
           scrollToEnd();
@@ -158,26 +242,28 @@ function AtlasApp() {
 
       if (controller.signal.aborted) return;
 
-      // TTS fallback only if native/realtime audio did not play.
-      if (!result.audioPlayed && result.text) {
-        try {
-          const tts = await fetchTtsAudio(result.text);
-          if (tts.audio && !controller.signal.aborted) {
-            setStatus("speaking");
-            await playBase64Mp3(tts.audio);
-          }
-        } catch {
-          // Text still shown.
-        }
+      if (result.pcmDelivered) {
+        dlog(
+          "turn",
+          `native pcm turnId=${result.turnId} firstAudio=${result.firstAudioMs ?? "?"}ms`,
+        );
+        setAudioDiag(`voice: native pcm ${result.firstAudioMs ?? "?"}ms`);
+      } else if (result.text) {
+        dwarn("turn", `native pcm missed — TTS fallback turnId=${result.turnId}`);
+        setStatus("speaking");
+        const outcome = await speakAtlasReply(result.text, result.turnId, controller.signal);
+        setAudioDiag(outcome === "spoken" ? "voice: tts fallback" : `voice: ${outcome}`);
+      } else {
+        setAudioDiag("voice: no text");
       }
 
       if (controller.signal.aborted) return;
       setConnection("online");
       setStreamingAtlas("");
-      setMessages((prev) => [...prev, { id: makeId(), role: "atlas", text: result.text }]);
+      pushMessage({ id: makeId(), role: "atlas", text: result.text });
       scrollToEnd();
     },
-    [scrollToEnd],
+    [pushMessage, scrollToEnd],
   );
 
   // Deep path: server reasoning model, then spoken via TTS. Used on explicit
@@ -188,12 +274,16 @@ function AtlasApp() {
       history: ChatTurn[],
       interrupted: boolean,
       controller: AbortController,
+      afterHoldPhrase: boolean,
     ) => {
-      const reply = await askChiefDeep(clean, history, interrupted, controller.signal);
+      const researchHint = afterHoldPhrase
+        ? "[Camron already heard a brief hold phrase. Do NOT open with Yes sir or any acknowledgment. Say sir at most once. Answer directly.] "
+        : "";
+      const reply = await askChiefDeep(researchHint + clean, history, interrupted, controller.signal);
       if (controller.signal.aborted) return;
 
       setConnection("online");
-      setMessages((prev) => [...prev, { id: makeId(), role: "atlas", text: reply.filtered }]);
+      pushMessage({ id: makeId(), role: "atlas", text: reply.filtered });
       scrollToEnd();
 
       try {
@@ -206,7 +296,7 @@ function AtlasApp() {
         // Text reply still shown if TTS fails.
       }
     },
-    [scrollToEnd],
+    [pushMessage, scrollToEnd],
   );
 
   const sendToAtlas = useCallback(
@@ -219,15 +309,20 @@ function AtlasApp() {
 
       const deep = deepModeRef.current || looksDeep(clean);
       const needsRefresh = looksRefresh(clean);
+      const needsResearch = looksResearch(clean);
       const needsMoment = deep || needsRefresh;
-      dlog("turn", `send deep=${deep} refresh=${needsRefresh} text="${clean.slice(0, 60)}"`);
+      dlog(
+        "turn",
+        `send deep=${deep} refresh=${needsRefresh} research=${needsResearch} text="${clean.slice(0, 60)}"`,
+      );
 
-      const history: ChatTurn[] = messagesRef.current.map((msg) => ({
-        role: msg.role === "atlas" ? "assistant" : "user",
-        content: msg.text,
-      }));
+      pushMessage({ id: makeId(), role: "user", text: clean });
 
-      setMessages((prev) => [...prev, { id: makeId(), role: "user", text: clean }]);
+      const history: ChatTurn[] = messagesRef.current
+        .filter((msg) => !msg.error)
+        .slice(0, -1)
+        .map(toChatTurn);
+
       setStatus("thinking");
       setStreamingAtlas("");
       setPartial("");
@@ -236,10 +331,20 @@ function AtlasApp() {
       const controller = new AbortController();
       activeRequestRef.current = controller;
 
+      let messageForAtlas = clean;
+      if (needsResearch) {
+        const loc = await getLocationContext();
+        if (loc) {
+          messageForAtlas = `[User location: ${loc}. Use this for weather, local news, and nearby queries.] ${clean}`;
+        }
+      }
+
       try {
         if (needsMoment) {
           await speakMomentSir();
           if (controller.signal.aborted) return;
+          await stopStreamingPlayback();
+          await resetAudioForPlayback();
         }
 
         if (needsRefresh) {
@@ -252,12 +357,14 @@ function AtlasApp() {
           if (controller.signal.aborted) return;
         }
 
-        await loadChiefSession();
+        if (!instructionsRef.current.trim()) {
+          await loadChiefSession();
+        }
 
         if (deep) {
-          await runDeepTurn(clean, history, interrupted, controller);
+          await runDeepTurn(messageForAtlas, history, interrupted, controller, needsMoment);
         } else {
-          await runFastTurn(clean, history, interrupted, controller);
+          await runFastTurn(messageForAtlas, history, interrupted, controller, needsMoment);
         }
       } catch (error) {
         if (
@@ -267,10 +374,7 @@ function AtlasApp() {
           return;
         }
         const message = error instanceof Error ? error.message : "Something went wrong.";
-        setMessages((prev) => [
-          ...prev,
-          { id: makeId(), role: "atlas", text: message, error: true },
-        ]);
+        pushMessage({ id: makeId(), role: "atlas", text: message, error: true });
         setConnection("offline");
         scrollToEnd();
       } finally {
@@ -297,7 +401,7 @@ function AtlasApp() {
         }
       }
     },
-    [loadChiefSession, runDeepTurn, runFastTurn, scrollToEnd],
+    [loadChiefSession, pushMessage, runDeepTurn, runFastTurn, scrollToEnd],
   );
 
   const voiceCapture = useVoiceCapture({
@@ -400,6 +504,89 @@ function AtlasApp() {
 
   const isListening = status === "listening" || voiceCapture.isActive();
 
+  const renderMessage: ListRenderItem<Message> = useCallback(({ item: msg }) => (
+    <View
+      style={[
+        styles.bubbleRow,
+        msg.role === "user" ? styles.rowRight : styles.rowLeft,
+      ]}
+    >
+      <View
+        style={[
+          styles.bubble,
+          msg.role === "user"
+            ? styles.userBubble
+            : msg.error
+              ? styles.errorBubble
+              : styles.atlasBubble,
+        ]}
+      >
+        {msg.role === "atlas" && !msg.error && (
+          <Text style={styles.bubbleLabel}>ATLAS</Text>
+        )}
+        <Text style={[styles.bubbleText, msg.role === "user" && styles.userText]}>
+          {msg.text}
+        </Text>
+      </View>
+    </View>
+  ), []);
+
+  const listFooter = useMemo(
+    () => (
+      <View style={styles.footer}>
+        {isListening && partial.length > 0 && (
+          <View style={[styles.bubbleRow, styles.rowRight]}>
+            <View style={[styles.bubble, styles.userBubble, styles.partialBubble]}>
+              <Text style={[styles.bubbleText, styles.userText]}>{partial}</Text>
+            </View>
+          </View>
+        )}
+
+        {isListening && partial.length === 0 && (
+          <View style={[styles.bubbleRow, styles.rowRight]}>
+            <View style={[styles.bubble, styles.userBubble, styles.partialBubble]}>
+              <Text style={[styles.bubbleText, styles.userText, styles.listeningHint]}>
+                Listening…
+              </Text>
+            </View>
+          </View>
+        )}
+
+        {streamingAtlas.length > 0 && (
+          <View style={[styles.bubbleRow, styles.rowLeft]}>
+            <View style={[styles.bubble, styles.atlasBubble]}>
+              <Text style={styles.bubbleLabel}>ATLAS</Text>
+              <Text style={styles.bubbleText}>{streamingAtlas}</Text>
+            </View>
+          </View>
+        )}
+
+        {status === "thinking" && !streamingAtlas && (
+          <View style={[styles.bubbleRow, styles.rowLeft]}>
+            <View style={[styles.bubble, styles.atlasBubble]}>
+              <ActivityIndicator color="#8b95a5" />
+            </View>
+          </View>
+        )}
+      </View>
+    ),
+    [isListening, partial, streamingAtlas, status],
+  );
+
+  const listEmpty = useMemo(
+    () =>
+      !streamingAtlas ? (
+        <View style={styles.empty}>
+          <Text style={styles.emptyTitle}>Good day, sir.</Text>
+          <Text style={styles.emptyBody}>
+            Tap the mic once to start a voice session — speak, pause, and Atlas replies.
+            The mic stays on so you can keep talking. Tap again while listening to stop.
+          </Text>
+        </View>
+      ) : null,
+    [streamingAtlas],
+  );
+
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
       <StatusBar style="light" />
@@ -407,8 +594,10 @@ function AtlasApp() {
       <View style={styles.header}>
         <View>
           <Text style={styles.title}>Atlas</Text>
-          <Text style={styles.subtitle} numberOfLines={1}>
-            {ATLAS_SERVER_URL.replace(/^https?:\/\//, "")} · native stream
+          <Text style={styles.subtitle} numberOfLines={2}>
+            {connection === "offline" && connectionError
+              ? connectionError
+              : `${activeServer.replace(/^https?:\/\//, "")} · ${APP_BUILD_STAMP}`}
           </Text>
         </View>
         <Pressable style={styles.statusPill} onPress={refreshHealth}>
@@ -433,88 +622,25 @@ function AtlasApp() {
         behavior={Platform.OS === "ios" ? "padding" : undefined}
         keyboardVerticalOffset={insets.top + 8}
       >
-        <ScrollView
-          ref={scrollRef}
+        <FlatList
+          ref={listRef}
           style={styles.flex}
-          contentContainerStyle={styles.transcript}
+          data={messages}
+          keyExtractor={(item) => item.id}
+          renderItem={renderMessage}
+          ListEmptyComponent={listEmpty}
+          ListFooterComponent={listFooter}
+          contentContainerStyle={[
+            styles.transcript,
+            messages.length === 0 && styles.transcriptEmpty,
+          ]}
           onContentSizeChange={scrollToEnd}
-        >
-          {messages.length === 0 && !streamingAtlas && (
-            <View style={styles.empty}>
-              <Text style={styles.emptyTitle}>Good day, sir.</Text>
-              <Text style={styles.emptyBody}>
-                Tap the mic once to start a voice session — speak, pause, and Atlas replies.
-                The mic stays on so you can keep talking. Tap again while listening to stop.
-              </Text>
-            </View>
-          )}
+          onLayout={scrollToEnd}
+          keyboardShouldPersistTaps="handled"
+          removeClippedSubviews={false}
+        />
 
-          {messages.map((msg) => (
-            <View
-              key={msg.id}
-              style={[
-                styles.bubbleRow,
-                msg.role === "user" ? styles.rowRight : styles.rowLeft,
-              ]}
-            >
-              <View
-                style={[
-                  styles.bubble,
-                  msg.role === "user"
-                    ? styles.userBubble
-                    : msg.error
-                      ? styles.errorBubble
-                      : styles.atlasBubble,
-                ]}
-              >
-                {msg.role === "atlas" && !msg.error && (
-                  <Text style={styles.bubbleLabel}>ATLAS</Text>
-                )}
-                <Text
-                  style={[styles.bubbleText, msg.role === "user" && styles.userText]}
-                >
-                  {msg.text}
-                </Text>
-              </View>
-            </View>
-          ))}
-
-          {isListening && partial.length > 0 && (
-            <View style={[styles.bubbleRow, styles.rowRight]}>
-              <View style={[styles.bubble, styles.userBubble, styles.partialBubble]}>
-                <Text style={[styles.bubbleText, styles.userText]}>{partial}</Text>
-              </View>
-            </View>
-          )}
-
-          {isListening && partial.length === 0 && (
-            <View style={[styles.bubbleRow, styles.rowRight]}>
-              <View style={[styles.bubble, styles.userBubble, styles.partialBubble]}>
-                <Text style={[styles.bubbleText, styles.userText, styles.listeningHint]}>
-                  Listening…
-                </Text>
-              </View>
-            </View>
-          )}
-
-          {streamingAtlas.length > 0 && (
-            <View style={[styles.bubbleRow, styles.rowLeft]}>
-              <View style={[styles.bubble, styles.atlasBubble]}>
-                <Text style={styles.bubbleLabel}>ATLAS</Text>
-                <Text style={styles.bubbleText}>{streamingAtlas}</Text>
-              </View>
-            </View>
-          )}
-
-          {status === "thinking" && !streamingAtlas && (
-            <View style={[styles.bubbleRow, styles.rowLeft]}>
-              <View style={[styles.bubble, styles.atlasBubble]}>
-                <ActivityIndicator color="#8b95a5" />
-              </View>
-            </View>
-          )}
-        </ScrollView>
-
+        {audioDiag && <Text style={styles.audioDiag}>{audioDiag}</Text>}
         {notice && <Text style={styles.notice}>{notice}</Text>}
 
         <View style={[styles.dock, { paddingBottom: insets.bottom + 12 }]}>
@@ -565,9 +691,9 @@ function AtlasApp() {
           </Pressable>
           <Text style={styles.hint}>
             {isListening && partial.trim()
-              ? "Pause to send, or tap mic again"
+              ? "Keep talking — ~3s pause sends, or tap mic"
               : isListening
-                ? "Listening… tap mic to stop"
+                ? "Listening… tap mic when you're done"
                 : STATUS_LABEL[status]}
           </Text>
         </View>
@@ -612,6 +738,8 @@ const styles = StyleSheet.create({
   dotUnknown: { backgroundColor: "#8b95a5" },
   statusText: { color: "#8b95a5", fontSize: 12 },
   transcript: { padding: 16, paddingBottom: 24, gap: 10 },
+  transcriptEmpty: { flexGrow: 1 },
+  footer: { gap: 10 },
   empty: { paddingTop: 64, paddingHorizontal: 12, alignItems: "center" },
   emptyTitle: { color: "#e6edf3", fontSize: 20, fontWeight: "600", marginBottom: 8 },
   emptyBody: { color: "#8b95a5", fontSize: 15, textAlign: "center", lineHeight: 22 },
@@ -639,6 +767,13 @@ const styles = StyleSheet.create({
     textAlign: "center",
     paddingHorizontal: 20,
     paddingBottom: 8,
+  },
+  audioDiag: {
+    color: "#8b95a5",
+    fontSize: 11,
+    textAlign: "center",
+    paddingHorizontal: 20,
+    paddingBottom: 4,
   },
   dock: {
     paddingHorizontal: 16,

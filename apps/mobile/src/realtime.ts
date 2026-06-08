@@ -1,12 +1,10 @@
 // xAI realtime: streaming text + native PCM audio (AVAudioEngine on iOS).
 import type { ChatTurn } from "./api";
-import {
-  startStreamingPcmPlayback,
-  stopStreamingPlayback,
-  type StreamingPcmPlayback,
-} from "./stream-audio";
-import { resetAudioForPlayback } from "./speech";
+import { startStreamingPcmPlayback, stopStreamingPlayback } from "./stream-audio";
 import { dlog, dwarn } from "./log";
+import { createRealtimePcmHandle } from "./realtime-pcm";
+import { decideTurnAudio, flushAppendChain, type TurnAudioRoute } from "./turn-audio-policy";
+import { traceTurnAudio } from "./turn-audio-trace";
 
 const REALTIME_MODEL = "grok-voice-think-fast-1.0";
 const REALTIME_VOICE = "rex";
@@ -14,9 +12,15 @@ const SAMPLE_RATE = 24000;
 
 export interface RealtimeTurnResult {
   text: string;
-  route: "realtime-text" | "realtime-text-audio";
+  route: TurnAudioRoute;
   audioPlayed: boolean;
+  /** @deprecated Use allowTtsFallback — kept for compatibility */
+  requiresTtsFallback: boolean;
+  allowTtsFallback: boolean;
+  sawAudioDeltas: boolean;
+  pcmDelivered: boolean;
   firstAudioMs?: number;
+  turnId: string;
 }
 
 export interface RealtimeTurnParams {
@@ -26,7 +30,10 @@ export interface RealtimeTurnParams {
   history: ChatTurn[];
   userMessage: string;
   interrupted?: boolean;
+  afterHoldPhrase?: boolean;
   voice?: string;
+  textOnly?: boolean;
+  onFirstAudio?: () => void;
   onTextDelta?: (text: string) => void;
   signal?: AbortSignal;
 }
@@ -59,39 +66,66 @@ function extractText(payload: Record<string, unknown>): string | null {
   return parts.length ? parts.join(" ") : null;
 }
 
-export async function runRealtimeTurn(params: RealtimeTurnParams): Promise<RealtimeTurnResult> {
-  await resetAudioForPlayback();
+const FINISH_PLAYBACK_TIMEOUT_MS = 15_000;
 
+async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timed out`)), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+function makeTurnId(): string {
+  return `rt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+}
+
+export async function runRealtimeTurn(params: RealtimeTurnParams): Promise<RealtimeTurnResult> {
+  const textOnly = params.textOnly === true;
+  const turnId = makeTurnId();
   const conversationMessages = params.history.slice(-10);
   const voicePrefix =
     "[Voice input — Camron spoke aloud via Atlas; STT transcribed. You can hear him. Respond in voice.] ";
+  const holdHint = params.afterHoldPhrase
+    ? "[Camron already heard a brief hold phrase. Do NOT open with Yes sir or any acknowledgment. Say sir at most ONCE in the entire reply. Begin directly with the answer.] "
+    : "";
   const userContent = params.interrupted
-    ? `${voicePrefix}[User interrupted while you were speaking. Continue naturally and address this:] ${params.userMessage}`
-    : `${voicePrefix}${params.userMessage}`;
+    ? `${voicePrefix}${holdHint}[User interrupted while you were speaking. Continue naturally and address this:] ${params.userMessage}`
+    : `${voicePrefix}${holdHint}${params.userMessage}`;
 
   const startedAt = Date.now();
+  let firstAudioMs: number | undefined;
+
+  const pcm = textOnly
+    ? null
+    : createRealtimePcmHandle(
+        (onFirst) =>
+          startStreamingPcmPlayback(SAMPLE_RATE, () => {
+            firstAudioMs = Date.now() - startedAt;
+            dlog("rt", `first audio (${firstAudioMs}ms)`);
+            onFirst?.();
+          }),
+        () => {
+          params.onFirstAudio?.();
+        },
+      );
+
+  void traceTurnAudio({ turnId, event: "turn-start", detail: textOnly ? "textOnly" : "native" });
 
   return new Promise<RealtimeTurnResult>((resolve, reject) => {
     const socket = new WebSocket(params.wsUrl, [`xai-client-secret.${params.clientSecret}`]);
     let configured = false;
     let responseRequested = false;
-    let responded = false;
+    let responseDone = false;
     let settledOut = false;
     let finalText = "";
     let sawTextDelta = false;
-    let sawAudio = false;
-    let firstAudioMs: number | undefined;
-
-    let playerPromise: Promise<StreamingPcmPlayback> | null = null;
-    const ensurePlayer = (): Promise<StreamingPcmPlayback> => {
-      if (!playerPromise) {
-        playerPromise = startStreamingPcmPlayback(SAMPLE_RATE, () => {
-          firstAudioMs = Date.now() - startedAt;
-          dlog("rt", `first audio (${firstAudioMs}ms)`);
-        });
-      }
-      return playerPromise;
-    };
 
     const timeout = setTimeout(() => fail(new Error("Realtime request timed out.")), 45000);
 
@@ -112,6 +146,7 @@ export async function runRealtimeTurn(params: RealtimeTurnParams): Promise<Realt
       params.signal?.removeEventListener("abort", onAbort);
       void stopStreamingPlayback();
       closeSocket();
+      void traceTurnAudio({ turnId, event: "turn-fail", detail: error.message });
       dwarn("rt", "turn failed:", error.message);
       reject(error);
     };
@@ -128,36 +163,74 @@ export async function runRealtimeTurn(params: RealtimeTurnParams): Promise<Realt
       if (settledOut) return;
       clearTimeout(timeout);
       params.signal?.removeEventListener("abort", onAbort);
-      closeSocket();
 
       const text = finalText.trim();
-      let audioPlayed = false;
 
-      if (sawAudio && playerPromise) {
-        try {
-          const player = await playerPromise;
-          await player.finish();
-          audioPlayed = true;
-          dlog("rt", `playback done (${Date.now() - startedAt}ms)`);
-        } catch (e) {
-          dwarn("rt", "native stream playback failed", e);
+      if (pcm) {
+        await flushAppendChain(pcm.appendChain);
+        if (pcm.sawAudioDeltas) {
+          try {
+            await withTimeout(pcm.finishPlayback(), FINISH_PLAYBACK_TIMEOUT_MS, "native finish");
+            dlog("rt", `native playback done (${Date.now() - startedAt}ms)`);
+          } catch (e) {
+            dwarn("rt", "native finish error/timeout — stopping stream", e);
+            await stopStreamingPlayback();
+          }
         }
       }
+
+      closeSocket();
 
       if (settledOut) return;
       settledOut = true;
 
-      if (!text && !audioPlayed) {
+      const decision = decideTurnAudio({
+        textOnly,
+        text,
+        sawAudioDeltas: pcm?.sawAudioDeltas ?? false,
+        pcmDelivered: pcm?.pcmDelivered ?? false,
+      });
+
+      void traceTurnAudio({
+        turnId,
+        event: "turn-complete",
+        route: decision.route,
+        sawAudioDeltas: decision.sawAudioDeltas,
+        pcmDelivered: decision.pcmDelivered,
+        allowTtsFallback: decision.allowTtsFallback,
+        ms: Date.now() - startedAt,
+        detail: decision.allowTtsFallback
+          ? "TTS-eligible"
+          : decision.sawAudioDeltas
+            ? "native-only"
+            : "text-only",
+      });
+
+      if (!text && !decision.sawAudioDeltas) {
         reject(new Error("Realtime returned no text."));
         return;
       }
 
+      if (decision.sawAudioDeltas && !decision.pcmDelivered) {
+        dwarn("rt", "audio deltas arrived but no PCM reached AVAudioEngine — no TTS (anti-double)");
+      }
+
       resolve({
         text,
-        route: sawAudio ? "realtime-text-audio" : "realtime-text",
-        audioPlayed,
+        route: decision.route,
+        audioPlayed: decision.sawAudioDeltas || decision.pcmDelivered,
+        requiresTtsFallback: decision.allowTtsFallback,
+        allowTtsFallback: decision.allowTtsFallback,
+        sawAudioDeltas: decision.sawAudioDeltas,
+        pcmDelivered: decision.pcmDelivered,
         firstAudioMs,
+        turnId,
       });
+    };
+
+    const maybeComplete = () => {
+      if (!responseDone || settledOut) return;
+      void complete();
     };
 
     socket.onopen = () => dlog("rt", "ws open");
@@ -170,7 +243,9 @@ export async function runRealtimeTurn(params: RealtimeTurnParams): Promise<Realt
         return;
       }
 
-      switch (payload.type) {
+      const type = String(payload.type ?? "");
+
+      switch (type) {
         case "session.created":
         case "conversation.created":
           if (configured) return;
@@ -184,10 +259,14 @@ export async function runRealtimeTurn(params: RealtimeTurnParams): Promise<Realt
                 voice: params.voice ?? REALTIME_VOICE,
                 turn_detection: { type: null },
                 tools: [{ type: "web_search" }],
-                audio: {
-                  input: { format: { type: "audio/pcm", rate: SAMPLE_RATE } },
-                  output: { format: { type: "audio/pcm", rate: SAMPLE_RATE } },
-                },
+                ...(textOnly
+                  ? {}
+                  : {
+                      audio: {
+                        input: { format: { type: "audio/pcm", rate: SAMPLE_RATE } },
+                        output: { format: { type: "audio/pcm", rate: SAMPLE_RATE } },
+                      },
+                    }),
               },
             }),
           );
@@ -195,6 +274,7 @@ export async function runRealtimeTurn(params: RealtimeTurnParams): Promise<Realt
         case "session.updated":
           if (responseRequested) return;
           responseRequested = true;
+          if (pcm) void pcm.prewarm();
           for (const turn of conversationMessages) {
             socket.send(
               JSON.stringify({
@@ -212,7 +292,7 @@ export async function runRealtimeTurn(params: RealtimeTurnParams): Promise<Realt
           socket.send(
             JSON.stringify({
               type: "response.create",
-              response: { modalities: ["text", "audio"] },
+              response: { modalities: textOnly ? ["text"] : ["text", "audio"] },
             }),
           );
           return;
@@ -237,11 +317,17 @@ export async function runRealtimeTurn(params: RealtimeTurnParams): Promise<Realt
           return;
         case "response.audio.delta":
         case "response.output_audio.delta":
+          if (textOnly || !pcm) return;
           if (typeof payload.delta === "string" && payload.delta.length > 0) {
-            if (!sawAudio) dlog("rt", `first audio delta (${Date.now() - startedAt}ms)`);
-            sawAudio = true;
-            void ensurePlayer().then((p) => p.appendBase64Chunk(payload.delta as string));
+            if (!pcm.sawAudioDeltas) {
+              dlog("rt", `first audio delta (${Date.now() - startedAt}ms)`);
+            }
+            pcm.appendDelta(payload.delta);
           }
+          return;
+        case "response.audio.done":
+        case "response.output_audio.done":
+          dlog("rt", `audio stream done (${Date.now() - startedAt}ms)`);
           return;
         case "response.content_part.done":
         case "response.output_item.done": {
@@ -253,9 +339,9 @@ export async function runRealtimeTurn(params: RealtimeTurnParams): Promise<Realt
           return;
         }
         case "response.done":
-          responded = true;
+          responseDone = true;
           dlog("rt", `response.done (${Date.now() - startedAt}ms)`);
-          void complete();
+          maybeComplete();
           return;
         case "error":
           fail(
@@ -271,7 +357,7 @@ export async function runRealtimeTurn(params: RealtimeTurnParams): Promise<Realt
 
     socket.onerror = () => fail(new Error("Realtime websocket error."));
     socket.onclose = () => {
-      if (!responded && !settledOut) fail(new Error("Realtime closed before completion."));
+      if (!responseDone && !settledOut) fail(new Error("Realtime closed before completion."));
     };
   });
 }

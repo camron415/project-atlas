@@ -2,8 +2,6 @@ import AVFoundation
 import ExpoModulesCore
 
 /// Gapless PCM16 mono streaming via AVAudioEngine + AVAudioPlayerNode.
-/// Buffers from xAI realtime `output_audio.delta` are scheduled back-to-back
-/// with no temp files and no expo-av segment gaps.
 public class AtlasStreamAudioModule: Module {
   private var engine: AVAudioEngine?
   private var playerNode: AVAudioPlayerNode?
@@ -14,6 +12,7 @@ public class AtlasStreamAudioModule: Module {
   private var completedBufferCount = 0
   private var isFinishedAppending = false
   private var finishContinuation: CheckedContinuation<Void, Error>?
+  private var finishTimeoutWork: DispatchWorkItem?
 
   private let audioQueue = DispatchQueue(label: "com.atlas.streamaudio.queue")
 
@@ -24,10 +23,8 @@ public class AtlasStreamAudioModule: Module {
       try await self.startStreaming(sampleRate: sampleRate)
     }
 
-    Function("appendPcmBase64") { (base64: String) in
-      self.audioQueue.async {
-        self.appendPcmBase64Internal(base64)
-      }
+    AsyncFunction("appendPcmBase64") { (base64: String) in
+      try await self.appendPcmBase64(base64)
     }
 
     AsyncFunction("finish") {
@@ -44,8 +41,6 @@ public class AtlasStreamAudioModule: Module {
       return true
     }
   }
-
-  // MARK: - Setup
 
   private func startStreaming(sampleRate: Double) async throws {
     try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
@@ -64,8 +59,14 @@ public class AtlasStreamAudioModule: Module {
     teardown(resetSession: false)
 
     let session = AVAudioSession.sharedInstance()
-    try session.setCategory(.playback, mode: .default, options: [])
+    // Match Grok-style voice: speaker output, silent switch, smooth PCM streaming.
+    try session.setCategory(
+      .playAndRecord,
+      mode: .spokenAudio,
+      options: [.defaultToSpeaker, .allowBluetoothHFP]
+    )
     try session.setActive(true, options: [])
+    try session.overrideOutputAudioPort(.speaker)
 
     guard let format = AVAudioFormat(
       commonFormat: .pcmFormatInt16,
@@ -83,6 +84,7 @@ public class AtlasStreamAudioModule: Module {
 
     try engine.start()
     player.play()
+    engine.mainMixerNode.outputVolume = 1.0
 
     self.engine = engine
     self.playerNode = player
@@ -94,7 +96,15 @@ public class AtlasStreamAudioModule: Module {
     self.finishContinuation = nil
   }
 
-  // MARK: - Append PCM
+  /// Awaitable append — JS must await each chunk before calling finish().
+  private func appendPcmBase64(_ base64: String) async throws {
+    try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+      audioQueue.async {
+        self.appendPcmBase64Internal(base64)
+        continuation.resume()
+      }
+    }
+  }
 
   private func appendPcmBase64Internal(_ base64: String) {
     guard let player = playerNode, let format = audioFormat else { return }
@@ -140,13 +150,25 @@ public class AtlasStreamAudioModule: Module {
     tryResolveFinish()
   }
 
-  // MARK: - Finish / teardown
-
   private func finishPlayback() async throws {
     try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+      let timeout = DispatchWorkItem { [weak self] in
+        guard let self = self else { return }
+        self.audioQueue.async {
+          guard self.finishContinuation != nil else { return }
+          self.teardown(resetSession: false)
+          self.finishContinuation?.resume()
+          self.finishContinuation = nil
+        }
+      }
+      finishTimeoutWork = timeout
+      DispatchQueue.global().asyncAfter(deadline: .now() + 15, execute: timeout)
+
       audioQueue.async {
         self.isFinishedAppending = true
         if self.scheduledBufferCount <= self.completedBufferCount {
+          self.finishTimeoutWork?.cancel()
+          self.finishTimeoutWork = nil
           self.teardown(resetSession: false)
           continuation.resume()
           return
@@ -160,6 +182,8 @@ public class AtlasStreamAudioModule: Module {
     guard isFinishedAppending else { return }
     guard scheduledBufferCount <= completedBufferCount else { return }
 
+    finishTimeoutWork?.cancel()
+    finishTimeoutWork = nil
     teardown(resetSession: false)
     finishContinuation?.resume()
     finishContinuation = nil
@@ -175,6 +199,9 @@ public class AtlasStreamAudioModule: Module {
     scheduledBufferCount = 0
     completedBufferCount = 0
     isFinishedAppending = false
+
+    finishTimeoutWork?.cancel()
+    finishTimeoutWork = nil
 
     if let continuation = finishContinuation {
       continuation.resume()

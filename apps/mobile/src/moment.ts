@@ -8,10 +8,9 @@ import { playBase64Mp3, stopPlayback } from "./audio";
 const MOMENT_PHRASES = [
   "One moment, sir.",
   "Just a moment, sir.",
-  "One moment, sir. Allow me to review.",
-  "Bear with me one moment, sir.",
-  "Right away, sir. One moment.",
-  "Certainly, sir. One moment.",
+  "One moment while I look into that, sir.",
+  "Allow me a moment, sir.",
+  "One moment, sir. I shall check.",
 ];
 
 export function speakMomentSir(): Promise<void> {

@@ -1,5 +1,7 @@
 import "dotenv/config";
 import express from "express";
+import http from "node:http";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { getDb } from "./db/schema.js";
@@ -24,6 +26,8 @@ import {
 } from "./reports/store.js";
 import { synthesizeProjectReport } from "./reports/synthesize.js";
 import { synthesizeSpeech } from "./xai/client.js";
+import { getSttSessionConfig } from "./xai/stt.js";
+import { attachSttProxy } from "./stt-proxy.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dataDir =
@@ -39,6 +43,7 @@ const publicUrl =
 
 const db = getDb(dataDir);
 const registry = loadRegistry();
+const transcriptPath = path.join(dataDir, "transcripts.jsonl");
 
 const debug = process.env.ATLAS_DEBUG === "1";
 const slog = (...args: unknown[]): void => {
@@ -111,6 +116,11 @@ app.post("/tts", async (req, res) => {
   }
 });
 
+app.get("/stt/config", (_req, res) => {
+  const config = getSttSessionConfig();
+  res.json(config);
+});
+
 app.post("/realtime/client-secret", async (_req, res) => {
   try {
     if (!process.env.XAI_API_KEY) {
@@ -158,6 +168,33 @@ app.post("/reports/refresh", async (req, res) => {
     manifest: buildContextManifest(db),
     reports: getLatestReports(db),
   });
+});
+
+app.post("/transcript", (req, res) => {
+  const role = req.body?.role;
+  const text = String(req.body?.text ?? "").trim();
+  if (!text || (role !== "user" && role !== "atlas")) {
+    res.status(400).json({ error: "role (user|atlas) and text are required" });
+    return;
+  }
+
+  const line =
+    JSON.stringify({
+      ts: typeof req.body?.ts === "string" ? req.body.ts : new Date().toISOString(),
+      role,
+      text,
+      source: "mobile",
+    }) + "\n";
+
+  try {
+    fs.mkdirSync(dataDir, { recursive: true });
+    fs.appendFileSync(transcriptPath, line, "utf8");
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "transcript write failed",
+    });
+  }
 });
 
 app.post("/chat", async (req, res) => {
@@ -227,8 +264,17 @@ app.post("/chat/voice", async (req, res) => {
   }
 });
 
-app.listen(port, host, () => {
+const httpServer = http.createServer(app);
+attachSttProxy(httpServer);
+
+httpServer.listen(port, host, () => {
+  const stt = getSttSessionConfig();
   console.log(`Atlas server listening on ${publicUrl} (bind ${host}:${port})`);
+  console.log(
+    stt.enabled
+      ? `STT proxy enabled at ws://${host}:${port}${stt.wsPath}`
+      : "STT proxy disabled (set XAI_API_KEY to enable)",
+  );
 
   // Boot-time scan
   const active = getActiveProjects(registry);

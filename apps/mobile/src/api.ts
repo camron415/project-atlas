@@ -1,4 +1,8 @@
-import { ATLAS_SERVER_URL } from "./config";
+import {
+  resolveAtlasServerUrl,
+  clearResolvedServerUrl,
+  getLastResolveError,
+} from "./config";
 
 export interface AtlasHealth {
   ok: boolean;
@@ -26,27 +30,55 @@ export interface RealtimeClientSecret {
   wsUrl: string;
 }
 
-async function getJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${ATLAS_SERVER_URL}${path}`, init);
-  const text = await response.text();
-  const data = text ? JSON.parse(text) : {};
-  if (!response.ok) {
-    const message =
-      (data && typeof data.error === "string" && data.error) ||
-      `Atlas server error (${response.status})`;
-    throw new Error(message);
-  }
-  return data as T;
-}
-
-export async function checkHealth(): Promise<AtlasHealth> {
+async function fetchJson<T>(base: string, path: string, init?: RequestInit): Promise<T> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 6000);
+  const timeout = setTimeout(() => controller.abort(), 15_000);
   try {
-    return await getJson<AtlasHealth>("/health", { signal: controller.signal });
+    const response = await fetch(`${base}${path}`, {
+      ...init,
+      signal: init?.signal ?? controller.signal,
+      headers: { Accept: "application/json", ...init?.headers },
+    });
+    const text = await response.text();
+    const data = text ? JSON.parse(text) : {};
+    if (!response.ok) {
+      const message =
+        (data && typeof data.error === "string" && data.error) ||
+        `Atlas server error (${response.status})`;
+      throw new Error(message);
+    }
+    return data as T;
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function getJson<T>(path: string, init?: RequestInit): Promise<T> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const base = await resolveAtlasServerUrl(attempt > 0);
+      return await fetchJson<T>(base, path, init);
+    } catch (error) {
+      clearResolvedServerUrl();
+      if (attempt === 1) throw error;
+    }
+  }
+  throw new Error(getLastResolveError() ?? "Atlas server unreachable");
+}
+
+export async function checkHealth(force = false): Promise<AtlasHealth> {
+  if (force) clearResolvedServerUrl();
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const base = await resolveAtlasServerUrl(force || attempt > 0);
+      return await fetchJson<AtlasHealth>(base, "/health");
+    } catch (error) {
+      clearResolvedServerUrl();
+      if (attempt === 1) throw error;
+    }
+  }
+  throw new Error(getLastResolveError() ?? "Atlas server unreachable");
 }
 
 export async function fetchChiefSession(): Promise<ChiefSession> {
@@ -109,6 +141,23 @@ export async function refreshReports(force = true, deep = false): Promise<Refres
   });
 }
 
+export interface TranscriptLine {
+  ts: string;
+  role: "user" | "atlas";
+  text: string;
+}
+
+/** Append one conversation line to the Mac transcript log (best-effort). */
+export async function postTranscriptLine(entry: TranscriptLine): Promise<void> {
+  await getJson<{ ok: boolean }>("/transcript", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(entry),
+  });
+}
+
 export function buildWsUrl(model: string): string {
   return `wss://api.x.ai/v1/realtime?model=${encodeURIComponent(model)}`;
 }
+
+export { getLastResolveError };

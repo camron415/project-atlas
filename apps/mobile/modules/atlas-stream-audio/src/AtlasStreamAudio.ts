@@ -2,14 +2,14 @@ import { requireNativeModule } from "expo-modules-core";
 
 export interface AtlasStreamAudioNative {
   startStreaming(sampleRate: number): Promise<void>;
-  appendPcmBase64(base64: string): void;
+  appendPcmBase64(base64: string): Promise<void>;
   finish(): Promise<void>;
   stop(): Promise<void>;
   isAvailable(): boolean;
 }
 
 export interface StreamingPlayback {
-  appendBase64Chunk: (base64Chunk: string) => void;
+  appendBase64Chunk: (base64Chunk: string) => Promise<void>;
   finish: () => Promise<void>;
   completion: Promise<void>;
   abort: () => void;
@@ -27,10 +27,6 @@ export function isNativeStreamAudioAvailable(): boolean {
   return nativeModule?.isAvailable?.() ?? false;
 }
 
-/**
- * Start gapless native PCM streaming (iOS AVAudioEngine).
- * Call appendBase64Chunk as deltas arrive, then finish() when done.
- */
 export async function startNativeStreamingPlayback(
   sampleRate = 24000,
   onFirstAudio?: () => void,
@@ -49,13 +45,13 @@ export async function startNativeStreamingPlayback(
   });
 
   return {
-    appendBase64Chunk: (base64Chunk: string) => {
+    appendBase64Chunk: async (base64Chunk: string) => {
       if (aborted || !base64Chunk) return;
       if (!sawFirst) {
         sawFirst = true;
         onFirstAudio?.();
       }
-      nativeModule!.appendPcmBase64(base64Chunk);
+      await nativeModule!.appendPcmBase64(base64Chunk);
     },
     finish: async () => {
       if (aborted) return;

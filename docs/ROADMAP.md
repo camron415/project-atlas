@@ -24,6 +24,16 @@
 
 **Exit:** Voice conversation about VocalLearn, career-dashboard, **and Atlas itself** with honest context manifest.
 
+## Phase 1.5 — Production voice (see `docs/PRODUCTION_VOICE.md`)
+
+Build in order; each feature gets a release build + commit.
+
+- [ ] **A — xAI Streaming STT + Smart Turn** (server proxy → native capture → mobile client)
+- [ ] **B — Speaker diarization + profiles** (who is speaking → personalized chief context)
+- [ ] **C — Wake word + background** (foreground "Hey Atlas" → Mac 24/7 daemon → iPhone push)
+
+**A1 done:** server STT WebSocket proxy (`/stt/stream`, `/stt/config`). Next: native capture (A2).
+
 ## Phase 2 — Managers + proactive Atlas (days 6–7+)
 
 - [ ] Per-project manager agents
