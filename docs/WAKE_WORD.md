@@ -2,10 +2,16 @@
 
 ## What works today
 
-- **Foreground wake word** while the app is open (Feature C1)
-- Toggle in **Speakers & wake** settings (gear in Atlas header)
-- **Test keyword:** built-in `porcupine` until you add a custom model
-- **Background audio** mode is enabled in `app.config.ts` for short screen-off turns
+- **Settings UI** — gear icon → Speakers & wake (toggle present, disabled until native link)
+- **Background audio** mode in `app.config.ts` for short screen-off turns
+- **Code scaffold** — `useWakeWord.ts` + wake → start listening hook in `App.tsx`
+
+## Known blocker (June 2026)
+
+`@picovoice/porcupine-react-native` v4 does not yet `pod install` cleanly with **Expo SDK 54 +
+New Architecture** (missing `RCT-Folly` spec). Porcupine was removed from the release build so
+speaker/diarization features ship reliably. Re-add when Picovoice publishes a fix or we disable
+New Architecture for a wake-word-only build variant.
 
 ## Enable wake word
 

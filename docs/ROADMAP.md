@@ -30,7 +30,7 @@ Build in order; each feature gets a release build + commit.
 
 - [x] **A — xAI Streaming STT + Smart Turn** (server proxy → native capture → mobile client)
 - [x] **B — Speaker diarization + profiles** (who is speaking → personalized chief context)
-- [x] **C1 — Foreground wake word** (Porcupine; custom Hey Atlas via `docs/WAKE_WORD.md`)
+- [ ] **C1 — Foreground wake word** (UI scaffold done; Porcupine native link blocked on New Arch — `docs/WAKE_WORD.md`)
 - [ ] **C5+ — Mac 24/7 wake + iPhone push** (next)
 
 **Build stamp:** `2026-06-08-speakers-wake` — Grok STT + diarization + speaker settings + wake scaffold.
