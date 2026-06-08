@@ -28,6 +28,14 @@ import { synthesizeProjectReport } from "./reports/synthesize.js";
 import { synthesizeSpeech } from "./xai/client.js";
 import { getSttSessionConfig } from "./xai/stt.js";
 import { attachSttProxy } from "./stt-proxy.js";
+import {
+  clearSessionMaps,
+  listSpeakerProfiles,
+  remapSpeaker,
+  resolveSpeaker,
+  seedSpeakerProfiles,
+  upsertSpeakerProfile,
+} from "./speakers/store.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dataDir =
@@ -85,12 +93,109 @@ app.get("/reports/manifest", (_req, res) => {
   res.json({ manifest: buildContextManifest(db) });
 });
 
-app.get("/chief/instructions", (_req, res) => {
+app.get("/chief/instructions", (req, res) => {
+  const sessionKey = String(req.query.sessionKey ?? "").trim();
+  const sttSpeakerIdRaw = req.query.sttSpeakerId;
+  const sttSpeakerId =
+    sttSpeakerIdRaw !== undefined && sttSpeakerIdRaw !== ""
+      ? Number(sttSpeakerIdRaw)
+      : null;
+
+  let speaker = null;
+  if (sessionKey && Number.isFinite(sttSpeakerId)) {
+    try {
+      speaker = resolveSpeaker(db, sessionKey, sttSpeakerId!).profile;
+    } catch (error) {
+      res.status(400).json({
+        error: error instanceof Error ? error.message : "speaker resolve failed",
+      });
+      return;
+    }
+  }
+
   res.json({
-    instructions: buildChiefInstructions(db),
+    instructions: buildChiefInstructions(db, speaker),
     model: getRealtimeModel(),
     voice: process.env.XAI_TTS_VOICE ?? "rex",
+    speaker: speaker
+      ? { slug: speaker.slug, displayName: speaker.displayName, role: speaker.role }
+      : null,
   });
+});
+
+app.get("/speakers", (_req, res) => {
+  res.json({ speakers: listSpeakerProfiles(db) });
+});
+
+app.post("/speakers", (req, res) => {
+  try {
+    const slug = String(req.body?.slug ?? "").trim().toLowerCase();
+    const displayName = String(req.body?.displayName ?? "").trim();
+    if (!slug || !displayName) {
+      res.status(400).json({ error: "slug and displayName are required" });
+      return;
+    }
+    const role = req.body?.role === "owner" ? "owner" : "guest";
+    const profile = upsertSpeakerProfile(db, {
+      slug,
+      displayName,
+      role,
+      memorySummary:
+        typeof req.body?.memorySummary === "string" ? req.body.memorySummary : undefined,
+      greetingStyle:
+        typeof req.body?.greetingStyle === "string" ? req.body.greetingStyle : undefined,
+    });
+    res.json({ speaker: profile });
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "speaker update failed",
+    });
+  }
+});
+
+app.post("/speakers/resolve", (req, res) => {
+  try {
+    const sessionKey = String(req.body?.sessionKey ?? "").trim();
+    const sttSpeakerId = Number(req.body?.sttSpeakerId);
+    if (!sessionKey || !Number.isFinite(sttSpeakerId)) {
+      res.status(400).json({ error: "sessionKey and sttSpeakerId are required" });
+      return;
+    }
+    res.json(resolveSpeaker(db, sessionKey, sttSpeakerId));
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "speaker resolve failed",
+    });
+  }
+});
+
+app.post("/speakers/map", (req, res) => {
+  try {
+    const sessionKey = String(req.body?.sessionKey ?? "").trim();
+    const sttSpeakerId = Number(req.body?.sttSpeakerId);
+    const profileSlug = String(req.body?.profileSlug ?? "").trim();
+    if (!sessionKey || !Number.isFinite(sttSpeakerId) || !profileSlug) {
+      res.status(400).json({
+        error: "sessionKey, sttSpeakerId, and profileSlug are required",
+      });
+      return;
+    }
+    res.json(remapSpeaker(db, sessionKey, sttSpeakerId, profileSlug));
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "speaker map failed",
+    });
+  }
+});
+
+app.post("/speakers/reset-session", (req, res) => {
+  const sessionKey = String(req.body?.sessionKey ?? "").trim();
+  if (!sessionKey) {
+    res.status(400).json({ error: "sessionKey is required" });
+    return;
+  }
+  const cleared = clearSessionMaps(db, sessionKey);
+  res.json({ ok: true, cleared });
 });
 
 app.post("/tts", async (req, res) => {
@@ -275,6 +380,8 @@ httpServer.listen(port, host, () => {
       ? `STT proxy enabled at ws://${host}:${port}${stt.wsPath}`
       : "STT proxy disabled (set XAI_API_KEY to enable)",
   );
+
+  seedSpeakerProfiles(db);
 
   // Boot-time scan
   const active = getActiveProjects(registry);

@@ -24,8 +24,10 @@ import {
   fetchRealtimeClientSecret,
   fetchTtsAudio,
   refreshReports,
+  resolveSpeakerProfile,
   type ChatTurn,
 } from "./src/api";
+import { SpeakerSettingsModal } from "./src/SpeakerSettingsModal";
 import { playBase64Mp3, stopPlayback } from "./src/audio";
 import { stopStreamingPlayback } from "./src/stream-audio";
 import { ATLAS_SERVER_URL, getResolvedServerUrl } from "./src/config";
@@ -45,6 +47,12 @@ import {
   useAdaptiveVoiceCapture,
   voiceCaptureModeLabel,
 } from "./src/useAdaptiveVoiceCapture";
+import {
+  isWakeWordAvailable,
+  useWakeWord,
+  wakeWordLabel,
+} from "./src/useWakeWord";
+import type { VoiceSubmitMeta } from "./src/useVoiceCapture";
 
 // Phrase triggers that opt a single turn into the slower reasoning model.
 const DEEP_INTENT = /\b(think (deeply|hard|carefully)|deep dive|deep[- ]?think|take your time|really think|think it through)\b/i;
@@ -79,7 +87,7 @@ type Status = "idle" | "listening" | "thinking" | "speaking";
 type Connection = "unknown" | "online" | "offline";
 
 /** Bumped each release — confirm in app header after install. */
-const APP_BUILD_STAMP = "2026-06-08-xai-stt";
+const APP_BUILD_STAMP = "2026-06-08-speakers-wake";
 
 function makeId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -115,8 +123,12 @@ function AtlasApp() {
   const [deepMode, setDeepMode] = useState(false);
   const [activeServer, setActiveServer] = useState(ATLAS_SERVER_URL);
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [activeSpeaker, setActiveSpeaker] = useState<string | null>(null);
+  const [wakeWordEnabled, setWakeWordEnabled] = useState(false);
 
   const listRef = useRef<FlatList<Message>>(null);
+  const voiceSessionKeyRef = useRef(`vs-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
   const messagesRef = useRef<Message[]>([]);
   const statusRef = useRef<Status>("idle");
   const activeRequestRef = useRef<AbortController | null>(null);
@@ -219,6 +231,7 @@ function AtlasApp() {
       interrupted: boolean,
       controller: AbortController,
       afterHoldPhrase: boolean,
+      voiceInputPrefix?: string,
     ) => {
       const secret = await fetchRealtimeClientSecret();
       setStatus("thinking");
@@ -235,6 +248,7 @@ function AtlasApp() {
         userMessage: clean,
         interrupted,
         afterHoldPhrase,
+        voiceInputPrefix,
         voice: voiceRef.current,
         textOnly: false,
         signal: controller.signal,
@@ -307,7 +321,7 @@ function AtlasApp() {
   );
 
   const sendToAtlas = useCallback(
-    async (text: string, interrupted: boolean) => {
+    async (text: string, interrupted: boolean, meta?: VoiceSubmitMeta) => {
       const clean = text.trim();
       if (!clean) {
         setStatus("idle");
@@ -339,6 +353,32 @@ function AtlasApp() {
       activeRequestRef.current = controller;
 
       let messageForAtlas = clean;
+      let voiceInputPrefix: string | undefined;
+
+      if (meta?.sttSpeakerId !== undefined && meta.sttSpeakerId !== null) {
+        try {
+          const resolved = await resolveSpeakerProfile(
+            voiceSessionKeyRef.current,
+            meta.sttSpeakerId,
+          );
+          setActiveSpeaker(resolved.profile.displayName);
+          const session = await fetchChiefSession(
+            voiceSessionKeyRef.current,
+            meta.sttSpeakerId,
+          );
+          instructionsRef.current = session.instructions;
+          voiceRef.current = session.voice || "rex";
+          messageForAtlas = `${resolved.messagePrefix} ${messageForAtlas}`;
+          voiceInputPrefix = `[Voice input — ${resolved.profile.displayName} spoke aloud (${resolved.profile.role}); STT transcribed. You can hear them. Respond in voice.] `;
+          dlog(
+            "speaker",
+            `${resolved.profile.displayName} (${resolved.profile.role}) sttId=${meta.sttSpeakerId}`,
+          );
+        } catch (error) {
+          dwarn("speaker", "resolve failed", error);
+        }
+      }
+
       if (needsResearch) {
         const loc = await getLocationContext();
         if (loc) {
@@ -371,7 +411,14 @@ function AtlasApp() {
         if (deep) {
           await runDeepTurn(messageForAtlas, history, interrupted, controller, needsMoment);
         } else {
-          await runFastTurn(messageForAtlas, history, interrupted, controller, needsMoment);
+          await runFastTurn(
+            messageForAtlas,
+            history,
+            interrupted,
+            controller,
+            needsMoment,
+            voiceInputPrefix,
+          );
         }
       } catch (error) {
         if (
@@ -422,14 +469,38 @@ function AtlasApp() {
         setStatus("idle");
       }
     },
-    onSubmit: async (text) => {
+    onSubmit: async (text, meta) => {
       const interrupted = interruptedRef.current;
       interruptedRef.current = false;
       setPartial("");
       setStatus("thinking");
-      await sendToAtlas(text, interrupted);
+      await sendToAtlas(text, interrupted, meta);
     },
   });
+
+  const startListeningFromWake = useCallback(async () => {
+    if (voiceCapture.isActive() || statusRef.current !== "idle") return;
+    interruptedRef.current = false;
+    micSessionRef.current = true;
+    setNotice(null);
+    setStatus("listening");
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    try {
+      await abortRealtime();
+      await stopPlayback();
+      await voiceCapture.startCapture();
+    } catch {
+      setStatus("idle");
+      micSessionRef.current = false;
+    }
+  }, [voiceCapture]);
+
+  useWakeWord(
+    wakeWordEnabled && connection === "online" && status === "idle" && !voiceCapture.isActive(),
+    () => {
+      void startListeningFromWake();
+    },
+  );
 
   useSpeechRecognitionEvent("result", voiceCapture.onSpeechResult);
   useSpeechRecognitionEvent("end", voiceCapture.onSpeechEnd);
@@ -604,24 +675,29 @@ function AtlasApp() {
           <Text style={styles.subtitle} numberOfLines={2}>
             {connection === "offline" && connectionError
               ? connectionError
-              : `${activeServer.replace(/^https?:\/\//, "")} · ${APP_BUILD_STAMP} · ${voiceCaptureModeLabel()}`}
+              : `${activeServer.replace(/^https?:\/\//, "")} · ${APP_BUILD_STAMP} · ${voiceCaptureModeLabel()}${activeSpeaker ? ` · ${activeSpeaker}` : ""}`}
           </Text>
         </View>
-        <Pressable style={styles.statusPill} onPress={refreshHealth}>
-          <View
-            style={[
-              styles.statusDot,
-              connection === "online"
-                ? styles.dotOnline
-                : connection === "offline"
-                  ? styles.dotOffline
-                  : styles.dotUnknown,
-            ]}
-          />
-          <Text style={styles.statusText}>
-            {connection === "online" ? "Connected" : connection === "offline" ? "Offline" : "…"}
-          </Text>
-        </Pressable>
+        <View style={styles.headerActions}>
+          <Pressable style={styles.gearBtn} onPress={() => setSettingsOpen(true)}>
+            <Text style={styles.gearIcon}>⚙</Text>
+          </Pressable>
+          <Pressable style={styles.statusPill} onPress={refreshHealth}>
+            <View
+              style={[
+                styles.statusDot,
+                connection === "online"
+                  ? styles.dotOnline
+                  : connection === "offline"
+                    ? styles.dotOffline
+                    : styles.dotUnknown,
+              ]}
+            />
+            <Text style={styles.statusText}>
+              {connection === "online" ? "Connected" : connection === "offline" ? "Offline" : "…"}
+            </Text>
+          </Pressable>
+        </View>
       </View>
 
       <KeyboardAvoidingView
@@ -707,6 +783,16 @@ function AtlasApp() {
           </Text>
         </View>
       </KeyboardAvoidingView>
+
+      <SpeakerSettingsModal
+        visible={settingsOpen}
+        sessionKey={voiceSessionKeyRef.current}
+        wakeWordEnabled={wakeWordEnabled}
+        wakeWordAvailable={isWakeWordAvailable()}
+        wakeWordLabel={wakeWordLabel()}
+        onClose={() => setSettingsOpen(false)}
+        onToggleWakeWord={setWakeWordEnabled}
+      />
     </View>
   );
 }
@@ -726,6 +812,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    gap: 8,
     paddingHorizontal: 20,
     paddingVertical: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
@@ -733,6 +820,16 @@ const styles = StyleSheet.create({
   },
   title: { color: "#e6edf3", fontSize: 22, fontWeight: "700", letterSpacing: 0.5 },
   subtitle: { color: "#5b6675", fontSize: 12, marginTop: 2 },
+  headerActions: { flexDirection: "row", alignItems: "center", gap: 8 },
+  gearBtn: {
+    backgroundColor: "#141a24",
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  gearIcon: { color: "#c5d0de", fontSize: 18 },
   statusPill: {
     flexDirection: "row",
     alignItems: "center",

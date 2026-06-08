@@ -55,7 +55,7 @@ export function getSttSessionConfig(): SttSessionConfig {
     interimResults: true,
     smartTurn,
     smartTurnTimeoutMs,
-    diarize: process.env.ATLAS_STT_DIARIZE === "1",
+    diarize: process.env.ATLAS_STT_DIARIZE !== "0",
     language: process.env.ATLAS_STT_LANGUAGE ?? "en",
     keyterms: parseKeyterms(process.env.ATLAS_STT_KEYTERMS),
     wsPath: "/stt/stream",

@@ -21,9 +21,13 @@ const IGNORABLE_MIC_ERRORS = new Set([
   "cancelled",
 ]);
 
+export interface VoiceSubmitMeta {
+  sttSpeakerId?: number | null;
+}
+
 export interface VoiceCaptureOptions {
   onPartial: (text: string) => void;
-  onSubmit: (text: string) => void | Promise<void>;
+  onSubmit: (text: string, meta?: VoiceSubmitMeta) => void | Promise<void>;
   onError: (message: string) => void;
   onCaptureEnd?: () => void;
 }

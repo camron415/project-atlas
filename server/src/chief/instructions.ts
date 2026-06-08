@@ -1,6 +1,8 @@
 import { buildChiefContext } from "../reports/store.js";
 import type Database from "better-sqlite3";
 import { PERSONA_REWRITE_PROMPT } from "../persona/filter.js";
+import type { SpeakerProfile } from "../speakers/types.js";
+import { buildInstructionsAddon } from "../speakers/store.js";
 
 const CHIEF_ROLE = `You are Atlas, Camron's chief assistant and project interface — including this Atlas codebase itself (slug: atlas).
 You help him plan next steps, brainstorm ideas, and break down complex topics in plain language.
@@ -57,12 +59,24 @@ Avoid:
 const PERSONA_REFERENCE = `Persona reference (match this feel in every reply):
 ${PERSONA_REWRITE_PROMPT.replace("{raw_response}", "[your factual answer here]")}`;
 
-export function buildChiefInstructions(db: Database.Database): string {
+export function buildChiefInstructions(
+  db: Database.Database,
+  speaker?: SpeakerProfile | null,
+): string {
   const context = buildChiefContext(db);
+  const speakerBlocks: string[] = [];
+  if (speaker) {
+    speakerBlocks.push(buildInstructionsAddon(speaker));
+    if (speaker.memorySummary.trim()) {
+      speakerBlocks.push(`## Speaker memory (${speaker.displayName})\n${speaker.memorySummary}`);
+    }
+  }
+
   return [
     CHIEF_ROLE,
     VOICE_INTERFACE,
     VOICE_STYLE,
+    ...speakerBlocks,
     PERSONA_REFERENCE,
     "## Cached project context",
     context,

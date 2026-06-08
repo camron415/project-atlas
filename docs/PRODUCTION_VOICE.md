@@ -87,11 +87,11 @@ Optional later: Picovoice Eagle on-device to map xAI speaker IDs → enrolled na
 
 | Step | Work | Test |
 | --- | --- | --- |
-| **B1** | Enable `diarize=true` on STT proxy; forward `speaker` in transcript events | Two people speak — different speaker IDs in logs |
-| **B2** | SQLite `speaker_profiles` + API `GET/POST /speakers` | Enroll Camron + one guest |
-| **B3** | Session mapping: first utterance in a session → prompt "Who is speaking?" only when unknown | Guest speaks → Atlas uses guest instructions |
-| **B4** | Per-speaker memory summaries (short, capped tokens) in chief instructions | Guest asks about VocalLearn — gets project facts, not Camron's career notes |
-| **B5** | UI: Settings → Speakers (enroll 10s clip, label name) | Rebuild, enroll, verify personalized greeting |
+| **B1** | Enable `diarize=true` on STT proxy; forward `speaker` in transcript events | ✅ Default on (`ATLAS_STT_DIARIZE=0` to disable) |
+| **B2** | SQLite `speaker_profiles` + API `GET/POST /speakers` | ✅ Seeded Camron + Guest |
+| **B3** | Session mapping: speaker 0 → owner, 1 → guest per voice session | ✅ `/speakers/resolve` + reset in settings |
+| **B4** | Per-speaker memory summaries in chief instructions | ✅ Owner vs guest addons |
+| **B5** | UI: Settings → Speakers (rename, reset maps) | ✅ Gear icon in header |
 
 ### Personalization injection (low token cost)
 
@@ -145,7 +145,7 @@ Phase C4 — iOS Shortcuts / Action Button
 
 | Step | Work | Test |
 | --- | --- | --- |
-| **C1** | Picovoice Porcupine native module + custom "Hey Atlas" model | Say wake phrase in foreground → listening starts |
+| **C1** | Picovoice Porcupine + custom "Hey Atlas" model | ✅ Scaffold — see `docs/WAKE_WORD.md` for `.ppn` + AccessKey |
 | **C2** | Low-power idle: Porcupine only until wake; then full STT + realtime | CPU/battery acceptable for 30 min foreground session |
 | **C3** | Background audio: extend session through one full turn after screen lock | Lock phone mid-reply — audio finishes |
 | **C4** | Opt-in UI + privacy copy; Settings → "Always listen for Hey Atlas" | App Review–safe consent flow |

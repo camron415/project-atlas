@@ -32,6 +32,7 @@ export interface RealtimeTurnParams {
   interrupted?: boolean;
   afterHoldPhrase?: boolean;
   voice?: string;
+  voiceInputPrefix?: string;
   textOnly?: boolean;
   onFirstAudio?: () => void;
   onTextDelta?: (text: string) => void;
@@ -91,7 +92,8 @@ export async function runRealtimeTurn(params: RealtimeTurnParams): Promise<Realt
   const turnId = makeTurnId();
   const conversationMessages = params.history.slice(-10);
   const voicePrefix =
-    "[Voice input — Camron spoke aloud via Atlas; STT transcribed. You can hear him. Respond in voice.] ";
+    params.voiceInputPrefix ??
+    "[Voice input — user spoke aloud via Atlas; STT transcribed. You can hear them. Respond in voice.] ";
   const holdHint = params.afterHoldPhrase
     ? "[Camron already heard a brief hold phrase. Do NOT open with Yes sir or any acknowledgment. Say sir at most ONCE in the entire reply. Begin directly with the answer.] "
     : "";

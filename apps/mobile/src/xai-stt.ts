@@ -2,13 +2,38 @@ import { fetchSttConfig, type SttConfig } from "./api";
 import { resolveAtlasServerUrl } from "./config";
 import { dlog, dwarn } from "./log";
 
+export interface SttWord {
+  text: string;
+  speaker?: number;
+}
+
 export interface SttTranscriptEvent {
   type: string;
   text?: string;
+  words?: SttWord[];
   is_final?: boolean;
   speech_final?: boolean;
   end_of_turn_confidence?: number;
   message?: string;
+}
+
+export function dominantSttSpeaker(words?: SttWord[]): number | null {
+  if (!words?.length) return null;
+  const counts = new Map<number, number>();
+  for (const word of words) {
+    if (typeof word.speaker !== "number") continue;
+    counts.set(word.speaker, (counts.get(word.speaker) ?? 0) + 1);
+  }
+  if (!counts.size) return null;
+  let bestId = 0;
+  let bestCount = -1;
+  for (const [id, count] of counts) {
+    if (count > bestCount) {
+      bestId = id;
+      bestCount = count;
+    }
+  }
+  return bestId;
 }
 
 export interface XaiSttSession {

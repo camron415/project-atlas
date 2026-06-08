@@ -9,7 +9,12 @@ import {
 } from "atlas-audio-capture";
 import { fetchSttConfig } from "./api";
 import { dlog } from "./log";
-import { openXaiSttSession, type SttTranscriptEvent, type XaiSttSession } from "./xai-stt";
+import {
+  dominantSttSpeaker,
+  openXaiSttSession,
+  type SttTranscriptEvent,
+  type XaiSttSession,
+} from "./xai-stt";
 import { LISTEN_WATCHDOG_MS } from "./voice-endpoint";
 import type { VoiceCaptureOptions } from "./useVoiceCapture";
 
@@ -25,6 +30,7 @@ export function useXaiSttCapture(options: VoiceCaptureOptions) {
   const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sttSessionRef = useRef<XaiSttSession | null>(null);
   const stopCaptureFnRef = useRef<(() => Promise<void>) | null>(null);
+  const sttSpeakerIdRef = useRef<number | null>(null);
 
   const getTranscript = () => transcriptRef.current.trim();
 
@@ -68,9 +74,11 @@ export function useXaiSttCapture(options: VoiceCaptureOptions) {
     activeRef.current = false;
     dlog("stt", `xai auto-submit "${text.slice(0, 80)}"`);
 
+    const speakerId = sttSpeakerIdRef.current;
+    sttSpeakerIdRef.current = null;
     await teardown();
     clearTranscript();
-    await optionsRef.current.onSubmit(text);
+    await optionsRef.current.onSubmit(text, { sttSpeakerId: speakerId });
   }, [teardown]);
 
   const armWatchdog = () => {
@@ -100,6 +108,11 @@ export function useXaiSttCapture(options: VoiceCaptureOptions) {
       transcriptRef.current = event.text;
       optionsRef.current.onPartial(event.text);
 
+      const speakerId = dominantSttSpeaker(event.words);
+      if (speakerId !== null) {
+        sttSpeakerIdRef.current = speakerId;
+      }
+
       if (event.speech_final) {
         const confidence =
           typeof event.end_of_turn_confidence === "number"
@@ -120,6 +133,7 @@ export function useXaiSttCapture(options: VoiceCaptureOptions) {
     }
 
     submittedRef.current = false;
+    sttSpeakerIdRef.current = null;
     clearWatchdog();
     activeRef.current = true;
     clearTranscript();

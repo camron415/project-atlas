@@ -21,6 +21,28 @@ export interface ChiefSession {
   instructions: string;
   model: string;
   voice: string;
+  speaker?: {
+    slug: string;
+    displayName: string;
+    role: "owner" | "guest";
+  } | null;
+}
+
+export interface SpeakerProfile {
+  slug: string;
+  displayName: string;
+  role: "owner" | "guest";
+  memorySummary: string;
+  greetingStyle: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SpeakerResolveResult {
+  profile: SpeakerProfile;
+  messagePrefix: string;
+  instructionsAddon: string;
+  mapped: boolean;
 }
 
 export interface RealtimeClientSecret {
@@ -81,8 +103,52 @@ export async function checkHealth(force = false): Promise<AtlasHealth> {
   throw new Error(getLastResolveError() ?? "Atlas server unreachable");
 }
 
-export async function fetchChiefSession(): Promise<ChiefSession> {
-  return getJson<ChiefSession>("/chief/instructions");
+export async function fetchChiefSession(
+  sessionKey?: string,
+  sttSpeakerId?: number | null,
+): Promise<ChiefSession> {
+  const params = new URLSearchParams();
+  if (sessionKey) params.set("sessionKey", sessionKey);
+  if (sttSpeakerId !== undefined && sttSpeakerId !== null && Number.isFinite(sttSpeakerId)) {
+    params.set("sttSpeakerId", String(sttSpeakerId));
+  }
+  const qs = params.toString();
+  return getJson<ChiefSession>(`/chief/instructions${qs ? `?${qs}` : ""}`);
+}
+
+export async function fetchSpeakers(): Promise<{ speakers: SpeakerProfile[] }> {
+  return getJson<{ speakers: SpeakerProfile[] }>("/speakers");
+}
+
+export async function updateSpeakerProfile(input: {
+  slug: string;
+  displayName: string;
+  role?: "owner" | "guest";
+}): Promise<{ speaker: SpeakerProfile }> {
+  return getJson<{ speaker: SpeakerProfile }>("/speakers", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+export async function resolveSpeakerProfile(
+  sessionKey: string,
+  sttSpeakerId: number,
+): Promise<SpeakerResolveResult> {
+  return getJson<SpeakerResolveResult>("/speakers/resolve", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sessionKey, sttSpeakerId }),
+  });
+}
+
+export async function resetSpeakerSession(sessionKey: string): Promise<{ cleared: number }> {
+  return getJson<{ ok: boolean; cleared: number }>("/speakers/reset-session", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sessionKey }),
+  });
 }
 
 export async function fetchRealtimeClientSecret(): Promise<RealtimeClientSecret> {

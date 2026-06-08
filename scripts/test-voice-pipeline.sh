@@ -41,6 +41,20 @@ print('OK: STT config')
 "
 
 echo ""
+echo "=== GET /speakers ==="
+curl -sf "${BASE}/speakers" \
+  | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+speakers=d.get('speakers') or []
+print('count:', len(speakers))
+if len(speakers) < 2:
+    print('FAIL: expected owner + guest profiles')
+    sys.exit(1)
+print('OK: speaker profiles')
+"
+
+echo ""
 echo "=== POST /realtime/client-secret ==="
 curl -sf -X POST "${BASE}/realtime/client-secret" \
   | python3 -c "import json,sys; d=json.load(sys.stdin); print('wsUrl:', d.get('wsUrl','?')[:60]+'...'); print('OK' if d.get('value') else 'FAIL')"

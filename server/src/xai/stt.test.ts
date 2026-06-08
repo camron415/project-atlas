@@ -34,16 +34,24 @@ function testBuildUrl(): void {
   console.log("  ok build URL with smart turn + keyterms");
 }
 
-function testDiarizeFlag(): void {
-  process.env.ATLAS_STT_DIARIZE = "1";
+function testDiarizeDefaultOn(): void {
+  delete process.env.ATLAS_STT_DIARIZE;
   const url = new URL(buildXaiSttWebSocketUrl());
   assert.equal(url.searchParams.get("diarize"), "true");
+  console.log("  ok diarize on by default");
+}
+
+function testDiarizeOptOut(): void {
+  process.env.ATLAS_STT_DIARIZE = "0";
+  const url = new URL(buildXaiSttWebSocketUrl());
+  assert.equal(url.searchParams.get("diarize"), null);
   delete process.env.ATLAS_STT_DIARIZE;
-  console.log("  ok diarize flag");
+  console.log("  ok diarize opt-out");
 }
 
 console.log("xai/stt tests");
 testConfigDefaults();
 testBuildUrl();
-testDiarizeFlag();
+testDiarizeDefaultOn();
+testDiarizeOptOut();
 console.log("All xai/stt tests passed.");

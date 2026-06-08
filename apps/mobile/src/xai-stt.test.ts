@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { httpBaseToWs } from "./xai-stt";
+import { dominantSttSpeaker, httpBaseToWs } from "./xai-stt";
 
 function testHttpToWs(): void {
   assert.equal(
@@ -13,6 +13,19 @@ function testHttpToWs(): void {
   console.log("  ok http → ws URL");
 }
 
+function testDominantSpeaker(): void {
+  assert.equal(
+    dominantSttSpeaker([
+      { text: "hi", speaker: 0 },
+      { text: "there", speaker: 1 },
+      { text: "camron", speaker: 0 },
+    ]),
+    0,
+  );
+  console.log("  ok dominant speaker");
+}
+
 console.log("xai-stt tests");
 testHttpToWs();
+testDominantSpeaker();
 console.log("All xai-stt tests passed.");

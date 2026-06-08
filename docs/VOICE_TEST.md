@@ -30,7 +30,8 @@ Tip: set `ATLAS_DEBUG=1` in `server/.env` and keep `EXPO_PUBLIC_ATLAS_DEBUG=1`
 - [ ] `curl http://10.0.0.84:8787/health` → `{"ok":true,...}`
 - [ ] iPhone Safari → `http://10.0.0.84:8787/health` → ok
 - [ ] App header shows **Connected** (green dot). If red, tap the pill to retry.
-- [ ] Subtitle shows build stamp `2026-06-08-xai-stt` and **Grok STT** (not Apple STT).
+- [ ] Subtitle shows `2026-06-08-speakers-wake` · **Grok STT** · speaker name after a voice turn.
+- [ ] Tap **⚙** → rename Guest profile, reset voice ID maps if needed.
 - [ ] `bash scripts/test-voice-pipeline.sh http://127.0.0.1:8787` passes on the Mac.
 
 ## 2. Core voice loop (2 min)

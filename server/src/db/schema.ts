@@ -60,5 +60,24 @@ function migrate(db: Database.Database): void {
       project_slug TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS speaker_profiles (
+      slug TEXT PRIMARY KEY,
+      display_name TEXT NOT NULL,
+      role TEXT NOT NULL CHECK (role IN ('owner', 'guest')),
+      memory_summary TEXT NOT NULL DEFAULT '',
+      greeting_style TEXT NOT NULL DEFAULT 'name',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS speaker_session_maps (
+      session_key TEXT NOT NULL,
+      stt_speaker_id INTEGER NOT NULL,
+      profile_slug TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (session_key, stt_speaker_id),
+      FOREIGN KEY (profile_slug) REFERENCES speaker_profiles(slug)
+    );
   `);
 }

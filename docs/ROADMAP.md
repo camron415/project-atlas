@@ -29,10 +29,11 @@
 Build in order; each feature gets a release build + commit.
 
 - [x] **A — xAI Streaming STT + Smart Turn** (server proxy → native capture → mobile client)
-- [ ] **B — Speaker diarization + profiles** (who is speaking → personalized chief context)
-- [ ] **C — Wake word + background** (foreground "Hey Atlas" → Mac 24/7 daemon → iPhone push)
+- [x] **B — Speaker diarization + profiles** (who is speaking → personalized chief context)
+- [x] **C1 — Foreground wake word** (Porcupine; custom Hey Atlas via `docs/WAKE_WORD.md`)
+- [ ] **C5+ — Mac 24/7 wake + iPhone push** (next)
 
-**A shipped:** Grok STT on phone via `atlas-audio-capture` + `/stt/stream` proxy. Build stamp `2026-06-08-xai-stt`.
+**Build stamp:** `2026-06-08-speakers-wake` — Grok STT + diarization + speaker settings + wake scaffold.
 
 ## Phase 2 — Managers + proactive Atlas (days 6–7+)
 

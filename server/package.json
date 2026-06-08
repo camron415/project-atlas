@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "scan": "tsx src/cli/scan-projects.ts",
     "refresh-reports": "tsx src/cli/refresh-reports.ts",
-    "test:stt": "tsx src/xai/stt.test.ts"
+    "test:stt": "tsx src/xai/stt.test.ts",
+    "test:speakers": "tsx src/speakers/store.test.ts"
   },
   "dependencies": {
     "better-sqlite3": "^11.9.1",

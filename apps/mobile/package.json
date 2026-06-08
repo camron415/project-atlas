@@ -18,6 +18,8 @@
     "test:stt": "npx tsx src/xai-stt.test.ts"
   },
   "dependencies": {
+    "@picovoice/porcupine-react-native": "^4.0.0",
+    "@picovoice/react-native-voice-processor": "^1.2.3",
     "atlas-audio-capture": "file:./modules/atlas-audio-capture",
     "atlas-stream-audio": "file:./modules/atlas-stream-audio",
     "expo": "~54.0.33",
