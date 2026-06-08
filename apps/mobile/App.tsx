@@ -41,7 +41,10 @@ import {
 } from "./src/speech";
 import { recordTranscript } from "./src/transcript";
 import { speakAtlasReply } from "./src/speak-reply";
-import { useVoiceCapture } from "./src/useVoiceCapture";
+import {
+  useAdaptiveVoiceCapture,
+  voiceCaptureModeLabel,
+} from "./src/useAdaptiveVoiceCapture";
 
 // Phrase triggers that opt a single turn into the slower reasoning model.
 const DEEP_INTENT = /\b(think (deeply|hard|carefully)|deep dive|deep[- ]?think|take your time|really think|think it through)\b/i;
@@ -76,7 +79,7 @@ type Status = "idle" | "listening" | "thinking" | "speaking";
 type Connection = "unknown" | "online" | "offline";
 
 /** Bumped each release — confirm in app header after install. */
-const APP_BUILD_STAMP = "2026-06-08-voice";
+const APP_BUILD_STAMP = "2026-06-08-xai-stt";
 
 function makeId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -158,10 +161,14 @@ function AtlasApp() {
       void getLocationContext().catch(() => {});
     } catch (error) {
       setConnection("offline");
-      setConnectionError(
+      const detail =
         getLastResolveError() ??
-          (error instanceof Error ? error.message : "Atlas server unreachable"),
-      );
+        (error instanceof Error ? error.message : "Atlas server unreachable");
+      const hint =
+        /network request failed|unreachable|abort/i.test(detail)
+          ? " — is the Mac server running? (cd server && npm run dev)"
+          : "";
+      setConnectionError(`${detail}${hint}`);
     }
   }, []);
 
@@ -404,7 +411,7 @@ function AtlasApp() {
     [loadChiefSession, pushMessage, runDeepTurn, runFastTurn, scrollToEnd],
   );
 
-  const voiceCapture = useVoiceCapture({
+  const voiceCapture = useAdaptiveVoiceCapture({
     onPartial: (text) => {
       partialRef.current = text;
       setPartial(text);
@@ -597,7 +604,7 @@ function AtlasApp() {
           <Text style={styles.subtitle} numberOfLines={2}>
             {connection === "offline" && connectionError
               ? connectionError
-              : `${activeServer.replace(/^https?:\/\//, "")} · ${APP_BUILD_STAMP}`}
+              : `${activeServer.replace(/^https?:\/\//, "")} · ${APP_BUILD_STAMP} · ${voiceCaptureModeLabel()}`}
           </Text>
         </View>
         <Pressable style={styles.statusPill} onPress={refreshHealth}>
@@ -691,7 +698,9 @@ function AtlasApp() {
           </Pressable>
           <Text style={styles.hint}>
             {isListening && partial.trim()
-              ? "Keep talking — ~3s pause sends, or tap mic"
+              ? voiceCaptureModeLabel() === "Grok STT"
+                ? "Keep talking — Smart Turn sends when you're done, or tap mic"
+                : "Keep talking — ~3s pause sends, or tap mic"
               : isListening
                 ? "Listening… tap mic when you're done"
                 : STATUS_LABEL[status]}

@@ -21,6 +21,7 @@ export ATLAS_TAILNET="${TAILNET}"
 export ATLAS_LAN_IP="${LAN_IP}"
 export EXPO_PUBLIC_ATLAS_SERVER_URL="http://${TS_HOST}:8787,http://${LAN_IP}:8787,http://${TS_IP}:8787"
 export EXPO_PUBLIC_ATLAS_DEBUG=0
+export EXPO_PUBLIC_XAI_STT=1
 
 echo "Atlas release build (standalone — no Metro required)"
 echo "  MagicDNS (primary): http://${TS_HOST}:8787"

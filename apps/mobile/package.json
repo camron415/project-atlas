@@ -14,9 +14,11 @@
     "android": "expo run:android",
     "typecheck": "tsc --noEmit",
     "test:audio": "npx tsx src/turn-audio-policy.test.ts",
-    "test:voice": "npx tsx src/voice-endpoint.test.ts"
+    "test:voice": "npx tsx src/voice-endpoint.test.ts",
+    "test:stt": "npx tsx src/xai-stt.test.ts"
   },
   "dependencies": {
+    "atlas-audio-capture": "file:./modules/atlas-audio-capture",
     "atlas-stream-audio": "file:./modules/atlas-stream-audio",
     "expo": "~54.0.33",
     "expo-av": "~16.0.8",

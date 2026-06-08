@@ -89,6 +89,23 @@ export async function fetchRealtimeClientSecret(): Promise<RealtimeClientSecret>
   return getJson<RealtimeClientSecret>("/realtime/client-secret", { method: "POST" });
 }
 
+export interface SttConfig {
+  enabled: boolean;
+  sampleRate: number;
+  encoding: "pcm";
+  interimResults: boolean;
+  smartTurn: number | null;
+  smartTurnTimeoutMs: number | null;
+  diarize: boolean;
+  language: string;
+  keyterms: string[];
+  wsPath: string;
+}
+
+export async function fetchSttConfig(): Promise<SttConfig> {
+  return getJson<SttConfig>("/stt/config");
+}
+
 export interface TtsResponse {
   audio: string | null;
   audioFormat: string;

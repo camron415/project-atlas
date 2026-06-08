@@ -46,11 +46,11 @@ Existing fast path → Grok Voice realtime (text in, PCM out)
 
 | Step | Work | Test |
 | --- | --- | --- |
-| **A1** | Server: `GET /stt/config`, WebSocket proxy `/stt/stream` → xAI | `scripts/test-stt-proxy.sh` connects, streams sample PCM |
-| **A2** | Native: `atlas-audio-capture` module — AVAudioEngine tap, 16 kHz PCM chunks | Module events fire in dev build; chunk size ~3200 B / 100 ms |
-| **A3** | Mobile: `useXaiSttCapture` — WS client, interim UI, submit on `speech_final` | Toggle `EXPO_PUBLIC_XAI_STT=1`; speak → accurate transcript |
+| **A1** | Server: `GET /stt/config`, WebSocket proxy `/stt/stream` → xAI | `bash scripts/test-voice-pipeline.sh` includes `/stt/config` |
+| **A2** | Native: `atlas-audio-capture` module — AVAudioEngine tap, 16 kHz PCM chunks | ✅ Shipped — rebuild required (`2026-06-08-xai-stt`) |
+| **A3** | Mobile: `useXaiSttCapture` — WS client, interim UI, submit on `speech_final` | ✅ Shipped — subtitle shows `Grok STT` |
 | **A4** | Keyterms + formatting: `Atlas`, `VocalLearn`, `Grok`, project names via `/stt/config` | Say "VocalLearn" / dollar amounts — verify ITN |
-| **A5** | Fallback: if proxy unreachable, auto-fallback to Apple STT (current path) | Airplane mode / server down → still works |
+| **A5** | Fallback: if proxy unreachable, auto-fallback to Apple STT (current path) | ✅ `useAdaptiveVoiceCapture` falls back on start error |
 | **A6** | Tune Smart Turn: `smart_turn` 0.5–0.9, `smart_turn_timeout` 3–5s for your pause style | Long monologue with 2s pauses — no cutoffs |
 
 ### Config (server `.env`)

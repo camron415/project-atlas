@@ -1,0 +1,11 @@
+{
+  "name": "atlas-audio-capture",
+  "version": "1.0.0",
+  "description": "PCM16 microphone capture at 16 kHz for xAI streaming STT",
+  "main": "index.ts",
+  "peerDependencies": {
+    "expo": "*",
+    "react": "*",
+    "react-native": "*"
+  }
+}

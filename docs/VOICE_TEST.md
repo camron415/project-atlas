@@ -29,13 +29,15 @@ Tip: set `ATLAS_DEBUG=1` in `server/.env` and keep `EXPO_PUBLIC_ATLAS_DEBUG=1`
 
 - [ ] `curl http://10.0.0.84:8787/health` → `{"ok":true,...}`
 - [ ] iPhone Safari → `http://10.0.0.84:8787/health` → ok
-- [ ] App header shows **Connected** (green dot). If red, tap it to retry.
+- [ ] App header shows **Connected** (green dot). If red, tap the pill to retry.
+- [ ] Subtitle shows build stamp `2026-06-08-xai-stt` and **Grok STT** (not Apple STT).
+- [ ] `bash scripts/test-voice-pipeline.sh http://127.0.0.1:8787` passes on the Mac.
 
 ## 2. Core voice loop (2 min)
 
 - [ ] Tap mic once → status shows **Listening…**
 - [ ] Say "What's the status of VocalLearn?" → words appear live in a user bubble
-- [ ] **Pause ~1s → it auto-sends** (no second tap)
+- [ ] **Pause when done** → Smart Turn auto-sends (Grok STT) or ~3s pause (Apple fallback)
 - [ ] Atlas reply text streams in; audio is **smooth and low-latency** (native AVAudioEngine)
 - [ ] After Atlas finishes, **mic stays on** (Listening) — no need to tap again for follow-up
 - [ ] Tap mic while listening (empty) → mic turns off
@@ -86,4 +88,15 @@ with `categoryOptions: ["defaultToSpeaker"]`. Apple only allows
 `defaultToSpeaker` with `playAndRecord`. The fix uses empty `categoryOptions: []`
 for playback (same as VocalLearn). If you still see -50 after pulling, reload
 the JS bundle (`r` in Metro) — no native rebuild required for that fix.
+
+### Red "Offline" / "Network request failed"
+
+The app probes your Mac Atlas server on launch. If the server is not running,
+every URL fails and the header shows **Offline**. Fix:
+
+```bash
+cd server && npm run dev
 ```
+
+Then tap the **Offline** pill in the app (or force-quit and reopen). Tailscale
+must be on for remote use; MagicDNS URL is baked into release builds.

@@ -28,11 +28,11 @@
 
 Build in order; each feature gets a release build + commit.
 
-- [ ] **A — xAI Streaming STT + Smart Turn** (server proxy → native capture → mobile client)
+- [x] **A — xAI Streaming STT + Smart Turn** (server proxy → native capture → mobile client)
 - [ ] **B — Speaker diarization + profiles** (who is speaking → personalized chief context)
 - [ ] **C — Wake word + background** (foreground "Hey Atlas" → Mac 24/7 daemon → iPhone push)
 
-**A1 done:** server STT WebSocket proxy (`/stt/stream`, `/stt/config`). Next: native capture (A2).
+**A shipped:** Grok STT on phone via `atlas-audio-capture` + `/stt/stream` proxy. Build stamp `2026-06-08-xai-stt`.
 
 ## Phase 2 — Managers + proactive Atlas (days 6–7+)
 
