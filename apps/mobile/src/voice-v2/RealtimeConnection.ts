@@ -118,6 +118,19 @@ export function connectRealtime(
     const type = String(payload.type ?? "");
 
     switch (type) {
+      case "proxy.analyst": {
+        const status = String(payload.status ?? "");
+        if (status === "running" || status === "done" || status === "error") {
+          emit({
+            type: "analyst_status",
+            status,
+            jobId: String(payload.jobId ?? ""),
+            project: String(payload.project ?? ""),
+            error: typeof payload.error === "string" ? payload.error : undefined,
+          });
+        }
+        return;
+      }
       case "proxy.configured":
         clearTimeout(connectTimer);
         ready = true;
@@ -250,6 +263,7 @@ export function connectRealtime(
         inputSampleRate: INPUT_SAMPLE_RATE,
         outputSampleRate: OUTPUT_SAMPLE_RATE,
         history: config.history?.slice(-10) ?? [],
+        chatSessionId: config.chatSessionId,
       }),
     );
   };

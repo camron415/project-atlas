@@ -100,5 +100,22 @@ function migrate(db: Database.Database): void {
 
     CREATE INDEX IF NOT EXISTS idx_chat_messages_session
       ON chat_messages(session_id, id ASC);
+
+    CREATE TABLE IF NOT EXISTS analyst_jobs (
+      id TEXT PRIMARY KEY,
+      project_slug TEXT NOT NULL,
+      focus TEXT NOT NULL,
+      user_intent TEXT,
+      status TEXT NOT NULL DEFAULT 'queued',
+      progress TEXT,
+      summary_markdown TEXT,
+      error TEXT,
+      deep INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_analyst_jobs_status
+      ON analyst_jobs(status, updated_at DESC);
   `);
 }

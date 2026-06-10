@@ -53,6 +53,8 @@ import {
 } from "./sessions/store.js";
 import { writeInboxArtifact } from "./inbox/store.js";
 import type { InboxProjectSlug } from "./inbox/types.js";
+import { enqueueAnalystJob } from "./analyst/run.js";
+import { getAnalystJob } from "./analyst/store.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dataDir =
@@ -554,9 +556,46 @@ app.post("/inbox/from-session", (req, res) => {
   }
 });
 
+const analystDeps = { db, registry, dataDir };
+
+app.post("/analyst/run", (req, res) => {
+  const project = String(req.body?.project ?? "").trim();
+  const focus = String(req.body?.focus ?? req.body?.userIntent ?? "").trim();
+  const userIntent = String(req.body?.userIntent ?? focus).trim();
+  const deep = Boolean(req.body?.deep);
+
+  if (!project || !focus) {
+    res.status(400).json({ error: "project and focus are required" });
+    return;
+  }
+
+  try {
+    const { jobId, project: resolved } = enqueueAnalystJob(analystDeps, {
+      project,
+      focus,
+      userIntent,
+      deep,
+    });
+    res.json({ jobId, project: resolved, status: "queued" });
+  } catch (error) {
+    res.status(400).json({
+      error: error instanceof Error ? error.message : "analyst enqueue failed",
+    });
+  }
+});
+
+app.get("/analyst/jobs/:id", (req, res) => {
+  const job = getAnalystJob(db, String(req.params.id));
+  if (!job) {
+    res.status(404).json({ error: "job not found" });
+    return;
+  }
+  res.json({ job });
+});
+
 const httpServer = http.createServer(app);
 attachSttProxy(httpServer);
-attachRealtimeProxy(httpServer);
+attachRealtimeProxy(httpServer, analystDeps);
 
 httpServer.listen(port, host, () => {
   const stt = getSttSessionConfig();

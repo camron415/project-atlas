@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "scan": "tsx src/cli/scan-projects.ts",
     "refresh-reports": "tsx src/cli/refresh-reports.ts",
+    "analyst": "tsx src/cli/analyst.ts",
     "test:stt": "tsx src/xai/stt.test.ts",
     "test:speakers": "tsx src/speakers/store.test.ts",
     "test:inbox": "tsx src/inbox/store.test.ts"

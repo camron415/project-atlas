@@ -9,4 +9,7 @@ export const AtlasModels = {
   scan: () => process.env.XAI_SCAN_MODEL ?? process.env.XAI_CHAT_MODEL ?? "grok-4-fast-non-reasoning",
   /** Realtime voice (WebSocket). */
   realtime: () => process.env.XAI_REALTIME_MODEL ?? "grok-voice-think-fast-1.0",
+  /** Read-only analyst brief synthesis (Phase 1.75). */
+  analyst: () =>
+    process.env.XAI_ANALYST_MODEL ?? process.env.XAI_SCAN_MODEL ?? "grok-4-fast-non-reasoning",
 } as const;

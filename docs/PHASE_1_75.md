@@ -86,36 +86,36 @@ Chief announces analyst status in voice: *"Reviewing VocalLearn…"* → *"Repor
 **Test:** `curl POST /inbox` → file appears in repo.
 
 ### Step 2 — Analyst job runner (read-only)
-- [ ] `server/src/analyst/run.ts` — input: project slug, focus prompt
-- [ ] Uses existing `getLatestReports` + optional `reports/refresh?deep=1`
-- [ ] Cheap model (`grok-3-mini` or env) → structured JSON + markdown brief
-- [ ] Store result in `analyst_jobs` table + `data/analyst/`
+- [x] `server/src/analyst/run.ts` — input: project slug, focus prompt
+- [x] Uses existing `getLatestReports` + optional deep scan
+- [x] Cheap model (`grok-4-fast-non-reasoning`) → structured markdown brief
+- [x] Store result in `analyst_jobs` table + `data/analyst/`
 
 **Test:** CLI `npm run analyst -- vocallearn "architecture risks"` → markdown out.
 
 ### Step 3 — Job status API (chief can poll / stream)
-- [ ] `POST /analyst/run` → `{ jobId }`
-- [ ] `GET /analyst/jobs/:id` → `{ status: queued|running|done|error, summary?, progress? }`
-- [ ] Chief tool: `request_analyst_review(project, focus)`
+- [x] `POST /analyst/run` → `{ jobId }`
+- [x] `GET /analyst/jobs/:id` → `{ status: queued|running|done|error, summary?, progress? }`
+- [x] Chief tool: `request_analyst_review(project, focus)`
 
 **Test:** Mobile shows thinking line; chief says status when polled.
 
 ### Step 4 — Chief tools wiring
-- [ ] Add tools to realtime proxy session (or chief `/chat` path)
-- [ ] `request_analyst_review`, `get_analyst_status`, `write_inbox_summary`
-- [ ] Instructions: when to run analyst vs when to only chat from cache
+- [x] Add tools to realtime proxy session
+- [x] `request_analyst_review`, `get_analyst_status`, `write_inbox_summary`
+- [x] Instructions: Jarvis confirmation, translator, plain-English briefs
 
-**Test:** Voice: "Review atlas" → status updates → discuss → "save inbox".
+**Test:** Voice: "Review atlas" → confirm → status updates → discuss → "save inbox".
 
 ### Step 5 — Mobile UX (minimal)
-- [ ] Show analyst status pill in footer ("Reviewing VocalLearn…")
+- [x] Show analyst status pill in footer ("Reviewing VocalLearn…")
 - [ ] Optional: inbox list in ☰ drawer (read-only)
 
 **Test:** Away-from-home session end-to-end.
 
 ### Step 6 — Session close template
-- [ ] `write_inbox_summary` merges: chat transcript + analyst brief + agreed actions
-- [ ] Filename: `inbox/{project}/YYYY-MM-DD-{slug}.md`
+- [x] `write_inbox_summary` merges: chat transcript + analyst brief + agreed actions
+- [x] Filename: `inbox/{project}/YYYY-MM-DD-{slug}.md`
 
 ---
 

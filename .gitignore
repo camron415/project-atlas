@@ -9,3 +9,4 @@ server/data/screenshots/
 server/data/transcripts.jsonl
 .DS_Store
 *.log
+server/data/analyst/

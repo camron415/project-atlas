@@ -51,6 +51,13 @@ export interface UnifiedVoiceTurnDeps {
   onRefresh: () => Promise<void>;
   onMoment: () => Promise<void>;
   getLocationPrefix: () => Promise<string | null>;
+  getChatSessionId?: () => string | null;
+  onAnalystStatus?: (status: {
+    status: "running" | "done" | "error";
+    jobId?: string;
+    project?: string;
+    error?: string;
+  } | null) => void;
 }
 
 function isClientLive(client: UnifiedRealtimeClient | null): boolean {

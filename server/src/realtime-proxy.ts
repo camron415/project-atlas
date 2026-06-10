@@ -1,5 +1,12 @@
 import type { Server as HttpServer, IncomingMessage } from "node:http";
+import type Database from "better-sqlite3";
 import { WebSocket, WebSocketServer } from "ws";
+import {
+  executeAnalystTool,
+  sendFunctionOutput,
+} from "./analyst/execute-tool.js";
+import { ANALYST_REALTIME_TOOLS } from "./analyst/tools.js";
+import type { ProjectRegistry } from "./projects/registry.js";
 import {
   buildRealtimeWebSocketUrl,
   getRealtimeModel,
@@ -9,6 +16,12 @@ import {
   recordRealtimeMetric,
   resetRealtimeMetrics,
 } from "./realtime-metrics.js";
+
+export interface RealtimeProxyDeps {
+  db: Database.Database;
+  registry: ProjectRegistry;
+  dataDir: string;
+}
 
 const debug = process.env.ATLAS_DEBUG === "1";
 const slog = (...args: unknown[]): void => {
@@ -29,6 +42,7 @@ export interface RealtimeProxyConfigure {
   inputSampleRate?: number;
   outputSampleRate?: number;
   history?: RealtimeHistoryTurn[];
+  chatSessionId?: string;
 }
 
 function buildConversationItem(turn: RealtimeHistoryTurn): Record<string, unknown> {
@@ -93,11 +107,15 @@ function parseClientSecret(request: IncomingMessage): string | null {
 function buildSessionUpdate(config: RealtimeProxyConfigure): Record<string, unknown> {
   const inputRate = config.inputSampleRate ?? 16000;
   const outputRate = config.outputSampleRate ?? 24000;
+  let instructions = config.instructions ?? "";
+  if (config.chatSessionId?.trim()) {
+    instructions += `\n\n## Current chat session\nSession id for write_inbox_summary: ${config.chatSessionId.trim()}`;
+  }
   return {
     type: "session.update",
     session: {
       model: getRealtimeModel(),
-      instructions: config.instructions ?? "",
+      instructions,
       voice: config.voice ?? process.env.XAI_TTS_VOICE ?? "rex",
       turn_detection: {
         type: "server_vad",
@@ -107,7 +125,7 @@ function buildSessionUpdate(config: RealtimeProxyConfigure): Record<string, unkn
         create_response: false,
         interrupt_response: true,
       },
-      tools: [{ type: "web_search" }],
+      tools: [{ type: "web_search" }, ...ANALYST_REALTIME_TOOLS],
       audio: {
         input: {
           format: { type: "audio/pcm", rate: inputRate },
@@ -153,7 +171,10 @@ function openUpstreamSocket(upstreamUrl: string, secret: string): Promise<WebSoc
 /**
  * Bidirectional Realtime proxy: mobile ↔ xAI with server-side session injection.
  */
-export function attachRealtimeProxy(httpServer: HttpServer): void {
+export function attachRealtimeProxy(
+  httpServer: HttpServer,
+  deps: RealtimeProxyDeps,
+): void {
   const wss = new WebSocketServer({ noServer: true });
 
   httpServer.on("upgrade", (request, socket, head) => {
@@ -172,13 +193,14 @@ export function attachRealtimeProxy(httpServer: HttpServer): void {
   });
 
   wss.on("connection", (clientWs: WebSocket, request: IncomingMessage) => {
-    void handleRealtimeClient(clientWs, request);
+    void handleRealtimeClient(clientWs, request, deps);
   });
 }
 
 async function handleRealtimeClient(
   clientWs: WebSocket,
   request: IncomingMessage,
+  deps: RealtimeProxyDeps,
 ): Promise<void> {
   const secret = parseClientSecret(request);
   if (!secret) {
@@ -253,6 +275,34 @@ async function handleRealtimeClient(
     slog("client ready — proxy.configured sent", sessionId);
   };
 
+  const handleFunctionCall = (event: {
+    name?: string;
+    call_id?: string;
+    arguments?: string;
+  }): void => {
+    const name = event.name;
+    const callId = event.call_id;
+    const args = event.arguments ?? "{}";
+    if (!name || !callId || upstream.readyState !== WebSocket.OPEN) return;
+
+    slog("function call", name, callId);
+    void executeAnalystTool(name, args, {
+      db: deps.db,
+      registry: deps.registry,
+      dataDir: deps.dataDir,
+      clientWs,
+      notifyAnalyst: (payload) => {
+        if (clientWs.readyState === WebSocket.OPEN) {
+          clientWs.send(JSON.stringify(payload));
+        }
+      },
+    }).then((output) => {
+      if (upstream.readyState === WebSocket.OPEN) {
+        sendFunctionOutput(upstream, callId, output);
+      }
+    });
+  };
+
   upstream.on("message", (data, isBinary) => {
     if (clientWs.readyState !== WebSocket.OPEN) return;
 
@@ -263,7 +313,16 @@ async function handleRealtimeClient(
 
     const text = data.toString();
     try {
-      const event = JSON.parse(text) as { type?: string };
+      const event = JSON.parse(text) as {
+        type?: string;
+        name?: string;
+        call_id?: string;
+        arguments?: string;
+      };
+
+      if (event.type === "response.function_call_arguments.done") {
+        handleFunctionCall(event);
+      }
       if (
         (event.type === "session.created" || event.type === "conversation.created") &&
         pendingConfigure

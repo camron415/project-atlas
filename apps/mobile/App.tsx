@@ -117,7 +117,7 @@ type Status = "idle" | "listening" | "thinking" | "speaking";
 type Connection = "unknown" | "online" | "offline";
 
 /** Bumped each release — confirm in app header after install. */
-const APP_BUILD_STAMP = "2026-06-10-voice-v2";
+const APP_BUILD_STAMP = "2026-06-10-phase-175";
 
 function formatListenError(error: unknown): string {
   const msg = error instanceof Error ? error.message : String(error);
@@ -182,6 +182,11 @@ function AtlasApp() {
     Array<{ id: string; title: string; created_at: string; updated_at: string }>
   >([]);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [analystStatus, setAnalystStatus] = useState<{
+    status: "running" | "done" | "error";
+    project?: string;
+    error?: string;
+  } | null>(null);
 
   const listRef = useRef<FlatList<Message>>(null);
   const chatSessionIdRef = useRef<string | null>(null);
@@ -703,6 +708,8 @@ function AtlasApp() {
       const loc = await getLocationContext();
       return loc ? `[User location: ${loc}. Use this for weather, local news, and nearby queries.]` : null;
     },
+    getChatSessionId: () => chatSessionIdRef.current,
+    onAnalystStatus: (status) => setAnalystStatus(status),
   });
 
   const voiceCapture = useAdaptiveVoiceCapture(
@@ -1292,6 +1299,11 @@ function AtlasApp() {
               <Text style={styles.micIcon}>{isListening ? "●" : "🎙"}</Text>
             )}
           </Pressable>
+          {analystStatus?.status === "running" ? (
+            <Text style={styles.analystPill}>
+              Reviewing {analystStatus.project ?? "project"}…
+            </Text>
+          ) : null}
           <Text style={styles.hint}>
             {isListening && partial.trim()
               ? voiceCaptureModeLabel() === "Grok STT"
@@ -1512,5 +1524,12 @@ const styles = StyleSheet.create({
   micInterrupt: { backgroundColor: "#f59e0b", shadowColor: "#f59e0b" },
   micPressed: { opacity: 0.9 },
   micIcon: { fontSize: 28, color: "#ffffff", fontWeight: "700" },
+  analystPill: {
+    color: "#7eb6ff",
+    fontSize: 13,
+    fontWeight: "600",
+    marginTop: 8,
+    textAlign: "center",
+  },
   hint: { color: "#8b95a5", fontSize: 13, marginTop: 10, textAlign: "center" },
 });

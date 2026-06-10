@@ -273,6 +273,18 @@ export class VoiceSession {
       dlog("voice-v2", `configured session=${event.sessionId ?? ""}`);
       return;
     }
+    if (event.type === "analyst_status") {
+      this.deps().onAnalystStatus?.({
+        status: event.status,
+        jobId: event.jobId,
+        project: event.project,
+        error: event.error,
+      });
+      if (event.status === "done" || event.status === "error") {
+        setTimeout(() => this.deps().onAnalystStatus?.(null), 4000);
+      }
+      return;
+    }
     if (event.type === "speech_started") {
       this.clearCommitTimer();
       return;
@@ -373,10 +385,12 @@ export class VoiceSession {
     if (history.length > 0) {
       dlog("voice-v2", `seeding ${history.length} prior turns into realtime session`);
     }
+    const chatSessionId = this.deps().getChatSessionId?.() ?? undefined;
     conn.configure({
       instructions: this.deps().getInstructions(),
       voice: this.deps().getVoice(),
       history,
+      chatSessionId: chatSessionId ?? undefined,
     });
 
     const micReady = this.ensureMic();

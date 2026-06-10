@@ -3,10 +3,19 @@ import type { ListenPhase } from "../useVoiceCapture";
 
 export type VoicePhase = "idle" | "connecting" | "listening" | "thinking" | "speaking" | "error";
 
+export interface AnalystStatus {
+  status: "running" | "done" | "error";
+  jobId?: string;
+  project?: string;
+  error?: string;
+}
+
 export interface VoiceTurnDeps {
   getInstructions: () => string;
   getVoice: () => string;
   getHistory: () => ChatTurn[];
+  getChatSessionId?: () => string | null;
+  onAnalystStatus?: (status: AnalystStatus | null) => void;
   isDeep: (text: string) => boolean;
   isRefresh: (text: string) => boolean;
   isResearch: (text: string) => boolean;
@@ -36,6 +45,7 @@ export interface RealtimeConfigure {
   instructions: string;
   voice: string;
   history?: ChatTurn[];
+  chatSessionId?: string;
 }
 
 export type RealtimeEvent =
@@ -46,4 +56,11 @@ export type RealtimeEvent =
   | { type: "atlas_text_delta"; text: string }
   | { type: "audio_delta"; base64: string }
   | { type: "response_done" }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+  | {
+      type: "analyst_status";
+      status: "running" | "done" | "error";
+      jobId: string;
+      project: string;
+      error?: string;
+    };
