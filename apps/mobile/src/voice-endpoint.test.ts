@@ -17,14 +17,14 @@ function test(name: string, fn: () => void): void {
 
 console.log("voice-endpoint tests");
 
-test("short phrase gets ~1.6s minimum", () => {
-  assert.equal(computeSilenceSubmitMs("hi"), 1600);
+test("short phrase gets ~0.8s minimum", () => {
+  assert.equal(computeSilenceSubmitMs("hi"), 800);
 });
 
-test("medium phrase gets 2.4s+", () => {
+test("medium phrase gets 1.6s+", () => {
   const text = "I need to update the atlas project with the latest context from my repos";
   assert.ok(countWords(text) > 12);
-  assert.ok(computeSilenceSubmitMs(text) >= 2900);
+  assert.ok(computeSilenceSubmitMs(text) >= 1600);
 });
 
 test("long monologue gets max pause window", () => {

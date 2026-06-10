@@ -24,6 +24,8 @@ function parseKeyterms(raw: string | undefined): string[] {
     .slice(0, 100);
 }
 
+// Higher threshold = Smart Turn must be more confident the speaker finished
+// before ending the turn, so natural mid-thought pauses aren't clipped.
 function parseSmartTurn(raw: string | undefined): number | null {
   if (!raw?.trim()) return 0.7;
   const value = Number(raw);
@@ -31,10 +33,12 @@ function parseSmartTurn(raw: string | undefined): number | null {
   return value;
 }
 
+// Max silence (ms) before Smart Turn forces speech_final. 4s matches
+// PRODUCTION_VOICE.md and xAI's dictation-friendly recommendation.
 function parseSmartTurnTimeout(raw: string | undefined): number | null {
   if (!raw?.trim()) return 4000;
   const value = Number(raw);
-  if (!Number.isFinite(value) || value < 1 || value > 5000) return 4000;
+  if (!Number.isFinite(value) || value < 1 || value > 12000) return 4000;
   return Math.round(value);
 }
 

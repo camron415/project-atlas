@@ -147,8 +147,8 @@ Phase C4 — iOS Shortcuts / Action Button
 | --- | --- | --- |
 | **C1** | Picovoice Porcupine + custom "Hey Atlas" model | ✅ Scaffold — see `docs/WAKE_WORD.md` for `.ppn` + AccessKey |
 | **C2** | Low-power idle: Porcupine only until wake; then full STT + realtime | CPU/battery acceptable for 30 min foreground session |
-| **C3** | Background audio: extend session through one full turn after screen lock | Lock phone mid-reply — audio finishes |
-| **C4** | Opt-in UI + privacy copy; Settings → "Always listen for Hey Atlas" | App Review–safe consent flow |
+| **C3** | Background audio: extend session through one full turn after screen lock | ✅ In progress — `activateVoiceSessionAudio` during listen/think/speak |
+| **C4** | Opt-in UI + privacy copy; Settings → "Always listen for Hey Atlas" | ✅ Wake toggle + phrase fallback; Shortcuts via `atlas://listen` |
 | **C5** | Mac daemon: Porcupine + STT + TTS → APNs to phone | Mac hears wake word → phone gets push |
 
 ### Step-by-step (Mac — true 24/7 Jarvis)

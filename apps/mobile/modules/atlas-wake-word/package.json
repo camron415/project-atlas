@@ -1,0 +1,11 @@
+{
+  "name": "atlas-wake-word",
+  "version": "1.0.0",
+  "description": "On-device wake word via Porcupine-iOS (Jarvis / custom .ppn)",
+  "main": "index.ts",
+  "peerDependencies": {
+    "expo": "*",
+    "react": "*",
+    "react-native": "*"
+  }
+}

@@ -13,29 +13,34 @@
 
 **Exit:** Atlas server lists all projects, deep-scans repos, and serves cached context + manifest.
 
-## Phase 1 — Voice wow MVP (in progress)
+## Phase 1 — Voice wow MVP ✅
 
 - [x] Chief chat API (fast model + cached reports)
 - [x] Persona rewrite step before TTS
 - [x] xAI Grok Voice realtime output (native AVAudioEngine stream)
 - [x] Expo app: chat transcript UI + push-to-talk + continuous mic
 - [x] Deep code refresh when user asks for "latest" / context review
-- [ ] Mac client first; iPhone connects to Mac server (**Tailscale for remote**)
+- [x] iPhone → Mac server via Tailscale (remote voice)
 
 **Exit:** Voice conversation about VocalLearn, career-dashboard, **and Atlas itself** with honest context manifest.
 
-## Phase 1.5 — Production voice (see `docs/PRODUCTION_VOICE.md`)
+## Phase 1.5 — Production voice ✅
 
-Build in order; each feature gets a release build + commit.
+See `docs/PHASE_1_5_CLOSEOUT.md` and `docs/VOICE_PHASE4.md`.
 
-- [x] **A — xAI Streaming STT + Smart Turn** (server proxy → native capture → mobile client)
-- [x] **B — Speaker diarization + profiles** (who is speaking → personalized chief context)
-- [ ] **C1 — Foreground wake word** (UI scaffold done; Porcupine native link blocked on New Arch — `docs/WAKE_WORD.md`)
-- [ ] **C5+ — Mac 24/7 wake + iPhone push** (next)
+- [x] **Unified Realtime** (Path B) — default release build
+- [x] **A/B** — Grok STT + speaker profiles (fallback paths retained)
+- [x] **C** — phrase wake, shortcuts, background audio, Live Activity
+- [x] **Chat sessions** — ☰ history, resume after app kill
 
-**Build stamp:** `2026-06-08-speakers-wake` — Grok STT + diarization + speaker settings + wake scaffold.
+**Build stamp:** `2026-06-10-chat-sessions`
 
-## Phase 2 — Managers + proactive Atlas (days 6–7+)
+## Phase 1.75 — Analyst + inbox (next)
+
+See `docs/PHASE_1_75.md`. Away-from-home **planning only** — analyst reviews repos,
+chief discusses, **one inbox file** at session close for Cursor.
+
+## Phase 2 — Managers + proactive Atlas (after 1.75)
 
 - [ ] Per-project manager agents
 - [ ] Scheduled reports

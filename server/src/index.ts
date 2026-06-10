@@ -26,8 +26,15 @@ import {
 } from "./reports/store.js";
 import { synthesizeProjectReport } from "./reports/synthesize.js";
 import { synthesizeSpeech } from "./xai/client.js";
+import { formatXaiApiError, xaiErrorStatus } from "./xai/errors.js";
 import { getSttSessionConfig } from "./xai/stt.js";
 import { attachSttProxy } from "./stt-proxy.js";
+import {
+  attachRealtimeProxy,
+  getRealtimeMetrics,
+  getRealtimeProxyPath,
+  realtimeProxyEnabled,
+} from "./realtime-proxy.js";
 import {
   clearSessionMaps,
   listSpeakerProfiles,
@@ -36,6 +43,14 @@ import {
   seedSpeakerProfiles,
   upsertSpeakerProfile,
 } from "./speakers/store.js";
+import {
+  appendChatMessage,
+  createChatSession,
+  deleteChatSession,
+  getChatSession,
+  listChatMessages,
+  listChatSessions,
+} from "./sessions/store.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dataDir =
@@ -77,7 +92,13 @@ app.get("/health", (_req, res) => {
     version: "0.1.0",
     url: publicUrl,
     lanIp: process.env.ATLAS_LAN_IP ?? null,
+    realtimeProxy: realtimeProxyEnabled(),
+    realtimeProxyPath: getRealtimeProxyPath(),
   });
+});
+
+app.get("/realtime/metrics", (_req, res) => {
+  res.json({ metrics: getRealtimeMetrics() });
 });
 
 app.get("/projects", (_req, res) => {
@@ -233,14 +254,15 @@ app.post("/realtime/client-secret", async (_req, res) => {
       return;
     }
     const secret = await createRealtimeClientSecret();
+    const base = publicUrl.replace(/^http/i, "ws");
     res.json({
       ...secret,
       wsUrl: `wss://api.x.ai/v1/realtime?model=${encodeURIComponent(secret.model)}`,
+      proxyWsUrl: `${base}${getRealtimeProxyPath()}?model=${encodeURIComponent(secret.model)}`,
     });
   } catch (error) {
-    res.status(500).json({
-      error: error instanceof Error ? error.message : "client secret failed",
-    });
+    const raw = error instanceof Error ? error.message : "client secret failed";
+    res.status(xaiErrorStatus(raw)).json({ error: formatXaiApiError(raw) });
   }
 });
 
@@ -369,8 +391,83 @@ app.post("/chat/voice", async (req, res) => {
   }
 });
 
+function newSessionId(): string {
+  return `cs-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+app.get("/sessions", (_req, res) => {
+  res.json({ sessions: listChatSessions(db) });
+});
+
+app.post("/sessions", (req, res) => {
+  const id = typeof req.body?.id === "string" && req.body.id.trim() ? req.body.id.trim() : newSessionId();
+  const title = String(req.body?.title ?? "New chat").trim() || "New chat";
+  try {
+    const existing = getChatSession(db, id);
+    if (existing) {
+      res.json({ session: existing });
+      return;
+    }
+    const session = createChatSession(db, id, title);
+    res.json({ session });
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "create session failed",
+    });
+  }
+});
+
+app.get("/sessions/:id", (req, res) => {
+  const session = getChatSession(db, String(req.params.id));
+  if (!session) {
+    res.status(404).json({ error: "session not found" });
+    return;
+  }
+  res.json({
+    session,
+    messages: listChatMessages(db, session.id),
+  });
+});
+
+app.post("/sessions/:id/messages", (req, res) => {
+  const sessionId = String(req.params.id);
+  const role = req.body?.role;
+  const text = String(req.body?.text ?? "").trim();
+  if (!text || (role !== "user" && role !== "atlas")) {
+    res.status(400).json({ error: "role (user|atlas) and text are required" });
+    return;
+  }
+  try {
+    let session = getChatSession(db, sessionId);
+    if (!session) {
+      session = createChatSession(db, sessionId);
+    }
+    const message = appendChatMessage(db, sessionId, {
+      clientId: typeof req.body?.clientId === "string" ? req.body.clientId : undefined,
+      role,
+      text,
+      error: Boolean(req.body?.error),
+    });
+    res.json({ session: getChatSession(db, sessionId), message });
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "append message failed",
+    });
+  }
+});
+
+app.delete("/sessions/:id", (req, res) => {
+  const ok = deleteChatSession(db, String(req.params.id));
+  if (!ok) {
+    res.status(404).json({ error: "session not found" });
+    return;
+  }
+  res.json({ ok: true });
+});
+
 const httpServer = http.createServer(app);
 attachSttProxy(httpServer);
+attachRealtimeProxy(httpServer);
 
 httpServer.listen(port, host, () => {
   const stt = getSttSessionConfig();
@@ -379,6 +476,11 @@ httpServer.listen(port, host, () => {
     stt.enabled
       ? `STT proxy enabled at ws://${host}:${port}${stt.wsPath}`
       : "STT proxy disabled (set XAI_API_KEY to enable)",
+  );
+  console.log(
+    realtimeProxyEnabled()
+      ? `Realtime proxy enabled at ws://${host}:${port}${getRealtimeProxyPath()}`
+      : "Realtime proxy disabled (set XAI_API_KEY to enable)",
   );
 
   seedSpeakerProfiles(db);

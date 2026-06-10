@@ -1,1 +1,7 @@
-export { isNativeStreamAudioAvailable, startNativeStreamingPlayback, stopNativeStreaming } from "./src/AtlasStreamAudio";
+export {
+  isNativeStreamAudioAvailable,
+  startNativeStreamingPlayback,
+  stopNativeStreaming,
+  prewarmNativeStreaming,
+  shutdownNativeStreaming,
+} from "./src/AtlasStreamAudio";

@@ -2,11 +2,24 @@ import AVFoundation
 import ExpoModulesCore
 
 /// Gapless PCM16 mono streaming via AVAudioEngine + AVAudioPlayerNode.
+///
+/// The engine OBJECT is created ONCE (ideally while foreground, via prewarm) and
+/// kept alive for the whole voice session; the audio session is activated then and
+/// never deactivated until shutdown(). Between turns the engine is *stopped* (not
+/// destroyed) so it doesn't fight the capture module for the shared audio hardware
+/// while listening. iOS denies *activating* a session in the background, so a new
+/// turn while the screen is locked only needs engine.start() on the already-active
+/// session — which is allowed — instead of a forbidden fresh activation. This is
+/// what makes locked-screen replies actually play. Call shutdown() at session end.
 public class AtlasStreamAudioModule: Module {
   private var engine: AVAudioEngine?
   private var playerNode: AVAudioPlayerNode?
   private var audioFormat: AVAudioFormat?
   private var byteRemainder = Data()
+  /// Batch xAI deltas; first chunk plays sooner so "Yes sir" isn't swallowed.
+  private var pendingBatch = Data()
+  private let minScheduleBytes = 4800
+  private let firstScheduleBytes = 2400
 
   private var scheduledBufferCount = 0
   private var completedBufferCount = 0
@@ -18,6 +31,10 @@ public class AtlasStreamAudioModule: Module {
 
   public func definition() -> ModuleDefinition {
     Name("AtlasStreamAudio")
+
+    AsyncFunction("prewarm") { (sampleRate: Double) in
+      try await self.prewarm(sampleRate: sampleRate)
+    }
 
     AsyncFunction("startStreaming") { (sampleRate: Double) in
       try await self.startStreaming(sampleRate: sampleRate)
@@ -33,8 +50,12 @@ public class AtlasStreamAudioModule: Module {
 
     AsyncFunction("stop") {
       self.audioQueue.sync {
-        self.teardown(resetSession: false)
+        self.endPlaybackKeepEngine()
       }
+    }
+
+    AsyncFunction("shutdown") {
+      await self.shutdown()
     }
 
     Function("isAvailable") {
@@ -42,11 +63,14 @@ public class AtlasStreamAudioModule: Module {
     }
   }
 
-  private func startStreaming(sampleRate: Double) async throws {
+  /// Build the engine ahead of time (call while foreground) so its object and
+  /// audio route exist before the screen can lock. Leaves the engine STOPPED so
+  /// it doesn't fight the capture module's engine for the shared audio hardware.
+  private func prewarm(sampleRate: Double) async throws {
     try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
       DispatchQueue.main.async {
         do {
-          try self.setupEngine(sampleRate: sampleRate)
+          try self.createEngineIfNeeded(sampleRate: sampleRate)
           continuation.resume()
         } catch {
           continuation.resume(throwing: error)
@@ -55,18 +79,38 @@ public class AtlasStreamAudioModule: Module {
     }
   }
 
-  private func setupEngine(sampleRate: Double) throws {
-    teardown(resetSession: false)
+  private func startStreaming(sampleRate: Double) async throws {
+    try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+      DispatchQueue.main.async {
+        do {
+          try self.createEngineIfNeeded(sampleRate: sampleRate)
+          self.audioQueue.sync {
+            self.byteRemainder = Data()
+            self.pendingBatch = Data()
+            self.scheduledBufferCount = 0
+            self.completedBufferCount = 0
+            self.isFinishedAppending = false
+            self.finishContinuation = nil
+          }
+          try self.ensureRunning()
+          continuation.resume()
+        } catch {
+          continuation.resume(throwing: error)
+        }
+      }
+    }
+  }
 
-    let session = AVAudioSession.sharedInstance()
-    // Match Grok-style voice: speaker output, silent switch, smooth PCM streaming.
-    try session.setCategory(
-      .playAndRecord,
-      mode: .spokenAudio,
-      options: [.defaultToSpeaker, .allowBluetoothHFP]
-    )
-    try session.setActive(true, options: [])
-    try session.overrideOutputAudioPort(.speaker)
+  /// Create the engine + player once. Reused across turns. Only rebuilt if the
+  /// sample rate changed. Does NOT touch the audio session — the capture module
+  /// and activateVoiceSessionAudio() own that. We just create the engine object.
+  private func createEngineIfNeeded(sampleRate: Double) throws {
+    if engine != nil, playerNode != nil, let format = audioFormat,
+       format.sampleRate == sampleRate {
+      return
+    }
+
+    fullTeardown(resetSession: false)
 
     guard let format = AVAudioFormat(
       commonFormat: .pcmFormatInt16,
@@ -81,19 +125,35 @@ public class AtlasStreamAudioModule: Module {
     let player = AVAudioPlayerNode()
     engine.attach(player)
     engine.connect(player, to: engine.mainMixerNode, format: format)
-
-    try engine.start()
-    player.play()
     engine.mainMixerNode.outputVolume = 1.0
+    engine.prepare()
 
     self.engine = engine
     self.playerNode = player
     self.audioFormat = format
     self.byteRemainder = Data()
+    self.pendingBatch = Data()
     self.scheduledBufferCount = 0
     self.completedBufferCount = 0
     self.isFinishedAppending = false
     self.finishContinuation = nil
+  }
+
+  /// Resume the existing engine for a new turn. This only START()s an engine on
+  /// an already-active session — never re-activates the session — so it works
+  /// even while the screen is locked. Re-asserts the speaker route each turn.
+  private func ensureRunning() throws {
+    guard let engine = engine, let player = playerNode else { return }
+    // Just assert the speaker route — don't re-set category or activate (the
+    // capture module owns the session). overrideOutputAudioPort is safe in BG.
+    try? AVAudioSession.sharedInstance().overrideOutputAudioPort(.speaker)
+    if !engine.isRunning {
+      engine.prepare()
+      try engine.start()
+    }
+    if !player.isPlaying {
+      player.play()
+    }
   }
 
   /// Awaitable append — JS must await each chunk before calling finish().
@@ -107,7 +167,7 @@ public class AtlasStreamAudioModule: Module {
   }
 
   private func appendPcmBase64Internal(_ base64: String) {
-    guard let player = playerNode, let format = audioFormat else { return }
+    guard playerNode != nil, audioFormat != nil else { return }
     guard var data = Data(base64Encoded: base64, options: .ignoreUnknownCharacters) else { return }
     if data.isEmpty { return }
 
@@ -121,6 +181,36 @@ public class AtlasStreamAudioModule: Module {
       data = data.dropLast()
     }
 
+    if data.isEmpty { return }
+
+    pendingBatch.append(data)
+    let threshold = scheduledBufferCount == 0 ? firstScheduleBytes : minScheduleBytes
+    while pendingBatch.count >= threshold {
+      let take = min(threshold, pendingBatch.count)
+      let slice = pendingBatch.prefix(take)
+      pendingBatch.removeFirst(take)
+      schedulePcmData(Data(slice))
+    }
+  }
+
+  /// Flush batched PCM when the API signals audio done (plays tail that was < minScheduleBytes).
+  private func flushPendingPcm() {
+    var tail = pendingBatch
+    pendingBatch = Data()
+    if !byteRemainder.isEmpty {
+      tail.append(byteRemainder)
+      byteRemainder = Data()
+    }
+    if tail.count % 2 != 0 {
+      tail = Data(tail.dropLast())
+    }
+    if !tail.isEmpty {
+      schedulePcmData(tail)
+    }
+  }
+
+  private func schedulePcmData(_ data: Data) {
+    guard let player = playerNode, let format = audioFormat else { return }
     if data.isEmpty { return }
 
     let frameCount = AVAudioFrameCount(data.count / MemoryLayout<Int16>.size)
@@ -156,20 +246,27 @@ public class AtlasStreamAudioModule: Module {
         guard let self = self else { return }
         self.audioQueue.async {
           guard self.finishContinuation != nil else { return }
-          self.teardown(resetSession: false)
-          self.finishContinuation?.resume()
+          let c = self.finishContinuation
           self.finishContinuation = nil
+          self.finishTimeoutWork = nil
+          self.resetPlaybackState()
+          self.haltEngineKeepObject()
+          c?.resume()
         }
       }
       finishTimeoutWork = timeout
-      DispatchQueue.global().asyncAfter(deadline: .now() + 15, execute: timeout)
+      // Safety net only — a normal reply resolves when its buffers drain. Long
+      // (multi-minute) replies must not be cut off, so keep this generous.
+      DispatchQueue.global().asyncAfter(deadline: .now() + 180, execute: timeout)
 
       audioQueue.async {
         self.isFinishedAppending = true
+        self.flushPendingPcm()
         if self.scheduledBufferCount <= self.completedBufferCount {
           self.finishTimeoutWork?.cancel()
           self.finishTimeoutWork = nil
-          self.teardown(resetSession: false)
+          self.resetPlaybackState()
+          self.haltEngineKeepObject()
           continuation.resume()
           return
         }
@@ -184,21 +281,64 @@ public class AtlasStreamAudioModule: Module {
 
     finishTimeoutWork?.cancel()
     finishTimeoutWork = nil
-    teardown(resetSession: false)
+    resetPlaybackState()
+    haltEngineKeepObject()
     finishContinuation?.resume()
     finishContinuation = nil
   }
 
-  private func teardown(resetSession: Bool) {
+  /// End the current utterance. Stops the engine to free the shared audio
+  /// hardware for the capture module during listening, but KEEPS the engine
+  /// object and the active session so the next turn only needs engine.start()
+  /// (allowed in the background) — never a forbidden background session activation.
+  private func endPlaybackKeepEngine() {
+    resetPlaybackState()
+    finishTimeoutWork?.cancel()
+    finishTimeoutWork = nil
+    haltEngineKeepObject()
+    if let continuation = finishContinuation {
+      continuation.resume()
+      finishContinuation = nil
+    }
+  }
+
+  /// Stop the player + engine on the main thread (AVAudioEngine control must run
+  /// there) without releasing the engine object or deactivating the session.
+  private func haltEngineKeepObject() {
+    DispatchQueue.main.async {
+      self.playerNode?.stop()
+      // Brief tail so the last buffer clears the mixer — avoids a sharp cutoff.
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+        self.engine?.stop()
+      }
+    }
+  }
+
+  private func resetPlaybackState() {
+    byteRemainder = Data()
+    pendingBatch = Data()
+    scheduledBufferCount = 0
+    completedBufferCount = 0
+    isFinishedAppending = false
+  }
+
+  /// Full release — call when the voice session ends.
+  private func shutdown() async {
+    await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+      DispatchQueue.main.async {
+        self.fullTeardown(resetSession: true)
+        continuation.resume()
+      }
+    }
+  }
+
+  private func fullTeardown(resetSession: Bool) {
     playerNode?.stop()
     engine?.stop()
     playerNode = nil
     engine = nil
     audioFormat = nil
-    byteRemainder = Data()
-    scheduledBufferCount = 0
-    completedBufferCount = 0
-    isFinishedAppending = false
+    resetPlaybackState()
 
     finishTimeoutWork?.cancel()
     finishTimeoutWork = nil

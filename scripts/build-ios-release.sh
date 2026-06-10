@@ -21,9 +21,34 @@ export ATLAS_TAILNET="${TAILNET}"
 export ATLAS_LAN_IP="${LAN_IP}"
 export EXPO_PUBLIC_ATLAS_SERVER_URL="http://${TS_HOST}:8787,http://${LAN_IP}:8787,http://${TS_IP}:8787"
 export EXPO_PUBLIC_ATLAS_DEBUG=0
-export EXPO_PUBLIC_XAI_STT=1
+export EXPO_PUBLIC_XAI_STT="${EXPO_PUBLIC_XAI_STT:-1}"
+export EXPO_PUBLIC_REALTIME_UNIFIED="${EXPO_PUBLIC_REALTIME_UNIFIED:-1}"
+export EXPO_PUBLIC_VOICE_V2="${EXPO_PUBLIC_VOICE_V2:-1}"
+export EXPO_PUBLIC_WAKE_WORD=1
+export EXPO_PUBLIC_WAKE_USE_JARVIS=1
+
+ENV_FILE="${ROOT}/server/.env"
+if [[ -f "${ENV_FILE}" ]]; then
+  PICO_KEY="$(grep -E '^EXPO_PUBLIC_PICOVOICE_ACCESS_KEY=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'" || true)"
+  if [[ -z "${PICO_KEY}" ]]; then
+    PICO_KEY="$(grep -E '^PICOVOICE_ACCESS_KEY=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'" || true)"
+  fi
+  if [[ -n "${PICO_KEY}" ]]; then
+    export EXPO_PUBLIC_PICOVOICE_ACCESS_KEY="${PICO_KEY}"
+    echo "  Picovoice: key loaded from server/.env"
+  else
+    echo "  Picovoice: add PICOVOICE_ACCESS_KEY to server/.env for wake word"
+  fi
+  WAKE_PPN="$(grep -E '^EXPO_PUBLIC_WAKE_KEYWORD_PATH=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'" || true)"
+  if [[ -n "${WAKE_PPN}" ]]; then
+    export EXPO_PUBLIC_WAKE_KEYWORD_PATH="${WAKE_PPN}"
+    export EXPO_PUBLIC_WAKE_USE_JARVIS=0
+    echo "  Wake keyword: ${WAKE_PPN}"
+  fi
+fi
 
 echo "Atlas release build (standalone — no Metro required)"
+echo "  Voice: XAI_STT=${EXPO_PUBLIC_XAI_STT} REALTIME_UNIFIED=${EXPO_PUBLIC_REALTIME_UNIFIED} VOICE_V2=${EXPO_PUBLIC_VOICE_V2}"
 echo "  MagicDNS (primary): http://${TS_HOST}:8787"
 echo "  LAN fallback:       http://${LAN_IP}:8787"
 echo "  Tailscale IP:       http://${TS_IP}:8787"

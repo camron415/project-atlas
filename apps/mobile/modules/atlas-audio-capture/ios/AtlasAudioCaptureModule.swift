@@ -10,7 +10,22 @@ public class AtlasAudioCaptureModule: Module {
   private let chunkBytes = 3200
   private let targetSampleRate: Double = 16000
   private var isCapturing = false
+  private var holdEngine: AVAudioEngine?
   private let processQueue = DispatchQueue(label: "com.atlas.audiocapture.queue")
+
+  /// Single recording session profile for mic capture + background hold.
+  /// JS also configures via expo, but native must be self-sufficient — Phase 2
+  /// removed this and mic input silently stopped working.
+  private func applyRecordingSession() throws {
+    let session = AVAudioSession.sharedInstance()
+    try session.setCategory(
+      .playAndRecord,
+      mode: .spokenAudio,
+      options: [.defaultToSpeaker, .allowBluetoothHFP, .mixWithOthers]
+    )
+    try session.setActive(true, options: [])
+    try session.overrideOutputAudioPort(.speaker)
+  }
 
   public func definition() -> ModuleDefinition {
     Name("AtlasAudioCapture")
@@ -22,7 +37,19 @@ public class AtlasAudioCaptureModule: Module {
     }
 
     AsyncFunction("stopCapture") {
-      self.stopCapture()
+      try await self.stopCaptureAsync()
+    }
+
+    AsyncFunction("startBackgroundHold") {
+      try await self.startBackgroundHold()
+    }
+
+    AsyncFunction("stopBackgroundHold") {
+      self.stopBackgroundHold()
+    }
+
+    AsyncFunction("releaseAudioSession") {
+      try await self.releaseAudioSession()
     }
 
     Function("isAvailable") {
@@ -44,15 +71,10 @@ public class AtlasAudioCaptureModule: Module {
   }
 
   private func setupCapture() throws {
+    stopBackgroundHold()
     teardown()
 
-    let session = AVAudioSession.sharedInstance()
-    try session.setCategory(
-      .playAndRecord,
-      mode: .voiceChat,
-      options: [.defaultToSpeaker, .allowBluetoothHFP]
-    )
-    try session.setActive(true, options: [])
+    try applyRecordingSession()
 
     guard let targetFormat = AVAudioFormat(
       commonFormat: .pcmFormatInt16,
@@ -131,6 +153,15 @@ public class AtlasAudioCaptureModule: Module {
     }
   }
 
+  private func stopCaptureAsync() async throws {
+    await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+      DispatchQueue.main.async {
+        self.teardown()
+        continuation.resume()
+      }
+    }
+  }
+
   private func stopCapture() {
     DispatchQueue.main.async {
       self.teardown()
@@ -148,5 +179,71 @@ public class AtlasAudioCaptureModule: Module {
     engine = nil
     converter = nil
     targetFormat = nil
+  }
+
+  /// Silent input tap — keeps playAndRecord alive while screen is off during thinking/speaking.
+  private func startBackgroundHold() async throws {
+    try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+      DispatchQueue.main.async {
+        do {
+          try self.setupBackgroundHold()
+          continuation.resume()
+        } catch {
+          continuation.resume(throwing: error)
+        }
+      }
+    }
+  }
+
+  private func setupBackgroundHold() throws {
+    if isCapturing || holdEngine != nil { return }
+
+    try applyRecordingSession()
+
+    let engine = AVAudioEngine()
+    let inputNode = engine.inputNode
+    let format = inputNode.outputFormat(forBus: 0)
+    inputNode.installTap(onBus: 0, bufferSize: 512, format: format) { _, _ in }
+
+    engine.prepare()
+    try engine.start()
+    holdEngine = engine
+  }
+
+  private func stopBackgroundHold() {
+    if Thread.isMainThread {
+      self.teardownBackgroundHold()
+    } else {
+      DispatchQueue.main.sync {
+        self.teardownBackgroundHold()
+      }
+    }
+  }
+
+  private func teardownBackgroundHold() {
+    if let engine = holdEngine {
+      engine.inputNode.removeTap(onBus: 0)
+      engine.stop()
+    }
+    holdEngine = nil
+  }
+
+  /// Return audio focus to other apps (YouTube, Music, etc.) when voice session ends.
+  private func releaseAudioSession() async throws {
+    try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+      DispatchQueue.main.async {
+        self.teardown()
+        self.teardownBackgroundHold()
+        do {
+          try AVAudioSession.sharedInstance().setActive(
+            false,
+            options: [.notifyOthersOnDeactivation]
+          )
+          continuation.resume()
+        } catch {
+          continuation.resume(throwing: error)
+        }
+      }
+    }
   }
 }

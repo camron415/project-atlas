@@ -50,6 +50,22 @@ export interface RealtimeClientSecret {
   expiresAt: string;
   model: string;
   wsUrl: string;
+  /** Mac proxy WebSocket URL (Path B unified realtime). */
+  proxyWsUrl?: string;
+}
+
+/** iOS 17+ blocks WebSocket to raw IPs — use the same resolved hostname as HTTP. */
+export function rewriteProxyWsUrl(httpBase: string, proxyWsUrl: string): string {
+  try {
+    const remote = new URL(proxyWsUrl);
+    const local = new URL(httpBase);
+    local.protocol = local.protocol === "https:" ? "wss:" : "ws:";
+    local.pathname = remote.pathname;
+    local.search = remote.search;
+    return local.toString();
+  } catch {
+    return proxyWsUrl;
+  }
 }
 
 async function fetchJson<T>(base: string, path: string, init?: RequestInit): Promise<T> {
@@ -151,8 +167,19 @@ export async function resetSpeakerSession(sessionKey: string): Promise<{ cleared
   });
 }
 
+/**
+ * Mint a fresh ephemeral Realtime secret. xAI secrets are single-use per WebSocket —
+ * never cache or reuse across turns.
+ */
 export async function fetchRealtimeClientSecret(): Promise<RealtimeClientSecret> {
-  return getJson<RealtimeClientSecret>("/realtime/client-secret", { method: "POST" });
+  const base = await resolveAtlasServerUrl();
+  const secret = await fetchJson<RealtimeClientSecret>(base, "/realtime/client-secret", {
+    method: "POST",
+  });
+  if (secret.proxyWsUrl) {
+    secret.proxyWsUrl = rewriteProxyWsUrl(base, secret.proxyWsUrl);
+  }
+  return secret;
 }
 
 export interface SttConfig {
@@ -168,8 +195,18 @@ export interface SttConfig {
   wsPath: string;
 }
 
+let sttConfigCache: SttConfig | null = null;
+
+/** STT config is static per server boot — cache it to avoid a round-trip on every mic resume. */
 export async function fetchSttConfig(): Promise<SttConfig> {
-  return getJson<SttConfig>("/stt/config");
+  if (sttConfigCache) return sttConfigCache;
+  const config = await getJson<SttConfig>("/stt/config");
+  sttConfigCache = config;
+  return config;
+}
+
+export function clearSttConfigCache(): void {
+  sttConfigCache = null;
 }
 
 export interface TtsResponse {
@@ -241,6 +278,74 @@ export async function postTranscriptLine(entry: TranscriptLine): Promise<void> {
 
 export function buildWsUrl(model: string): string {
   return `wss://api.x.ai/v1/realtime?model=${encodeURIComponent(model)}`;
+}
+
+export interface ChatSessionMeta {
+  id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChatSessionMessage {
+  id: number;
+  session_id: string;
+  client_id: string | null;
+  role: "user" | "atlas";
+  text: string;
+  error: number;
+  created_at: string;
+}
+
+export async function fetchChatSessions(): Promise<ChatSessionMeta[]> {
+  const data = await getJson<{ sessions: ChatSessionMeta[] }>("/sessions");
+  return data.sessions ?? [];
+}
+
+export async function createChatSession(
+  id: string,
+  title = "New chat",
+): Promise<ChatSessionMeta> {
+  const data = await getJson<{ session: ChatSessionMeta }>("/sessions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id, title }),
+  });
+  return data.session;
+}
+
+export async function fetchChatSession(sessionId: string): Promise<{
+  session: ChatSessionMeta;
+  messages: ChatSessionMessage[];
+}> {
+  return getJson(`/sessions/${encodeURIComponent(sessionId)}`);
+}
+
+export async function appendSessionMessage(
+  sessionId: string,
+  message: {
+    clientId?: string;
+    role: "user" | "atlas";
+    text: string;
+    error?: boolean;
+  },
+): Promise<void> {
+  await getJson(`/sessions/${encodeURIComponent(sessionId)}/messages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      clientId: message.clientId,
+      role: message.role,
+      text: message.text,
+      error: message.error,
+    }),
+  });
+}
+
+export async function deleteChatSession(sessionId: string): Promise<void> {
+  await getJson(`/sessions/${encodeURIComponent(sessionId)}`, {
+    method: "DELETE",
+  });
 }
 
 export { getLastResolveError };

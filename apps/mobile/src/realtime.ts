@@ -67,7 +67,9 @@ function extractText(payload: Record<string, unknown>): string | null {
   return parts.length ? parts.join(" ") : null;
 }
 
-const FINISH_PLAYBACK_TIMEOUT_MS = 15_000;
+// Long replies must never be cut off mid-sentence. This bounds only a *stuck*
+// player, not normal playback (which resolves as soon as buffers drain).
+const FINISH_PLAYBACK_TIMEOUT_MS = 180_000;
 
 async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -129,7 +131,8 @@ export async function runRealtimeTurn(params: RealtimeTurnParams): Promise<Realt
     let finalText = "";
     let sawTextDelta = false;
 
-    const timeout = setTimeout(() => fail(new Error("Realtime request timed out.")), 45000);
+    // Bounds generation time only — cleared on response.done before playback drains.
+    const timeout = setTimeout(() => fail(new Error("Realtime request timed out.")), 120000);
 
     const closeSocket = () => {
       try {
@@ -183,7 +186,6 @@ export async function runRealtimeTurn(params: RealtimeTurnParams): Promise<Realt
 
       closeSocket();
 
-      if (settledOut) return;
       settledOut = true;
 
       const decision = decideTurnAudio({
@@ -357,9 +359,14 @@ export async function runRealtimeTurn(params: RealtimeTurnParams): Promise<Realt
       }
     };
 
-    socket.onerror = () => fail(new Error("Realtime websocket error."));
-    socket.onclose = () => {
-      if (!responseDone && !settledOut) fail(new Error("Realtime closed before completion."));
+    socket.onerror = () => {
+      fail(new Error("Realtime websocket error (check xAI credits and network)."));
+    };
+    socket.onclose = (ev) => {
+      if (!responseDone && !settledOut) {
+        const code = "code" in ev ? (ev as CloseEvent).code : 0;
+        fail(new Error(`Realtime closed before completion (code ${code}).`));
+      }
     };
   });
 }

@@ -1,10 +1,12 @@
 import { requireNativeModule } from "expo-modules-core";
 
 export interface AtlasStreamAudioNative {
+  prewarm(sampleRate: number): Promise<void>;
   startStreaming(sampleRate: number): Promise<void>;
   appendPcmBase64(base64: string): Promise<void>;
   finish(): Promise<void>;
   stop(): Promise<void>;
+  shutdown(): Promise<void>;
   isAvailable(): boolean;
 }
 
@@ -70,5 +72,19 @@ export async function startNativeStreamingPlayback(
 export async function stopNativeStreaming(): Promise<void> {
   if (nativeModule) {
     await nativeModule.stop();
+  }
+}
+
+/** Create the playback engine ahead of time (call while foreground). */
+export async function prewarmNativeStreaming(sampleRate = 24000): Promise<void> {
+  if (nativeModule?.prewarm) {
+    await nativeModule.prewarm(sampleRate);
+  }
+}
+
+/** Fully release the playback engine + audio session (call when session ends). */
+export async function shutdownNativeStreaming(): Promise<void> {
+  if (nativeModule?.shutdown) {
+    await nativeModule.shutdown();
   }
 }

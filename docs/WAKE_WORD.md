@@ -1,37 +1,42 @@
-# Hey Atlas — Wake Word Setup (Feature C)
+# Hey Atlas — Wake Word + Background Listening
 
-## What works today
+## Option A — No Picovoice account (default)
 
-- **Settings UI** — gear icon → Speakers & wake (toggle present, disabled until native link)
-- **Background audio** mode in `app.config.ts` for short screen-off turns
-- **Code scaffold** — `useWakeWord.ts` + wake → start listening hook in `App.tsx`
+Release builds enable **phrase wake** automatically. No signup or API key required.
 
-## Known blocker (June 2026)
+1. Rebuild: `./scripts/build-ios-release.sh`
+2. Open Atlas → **⚙ Settings** → turn **Wake word** **On**
+3. Say **"Hey Atlas"** (or **"OK Atlas"**) while the app is idle
 
-`@picovoice/porcupine-react-native` v4 does not yet `pod install` cleanly with **Expo SDK 54 +
-New Architecture** (missing `RCT-Folly` spec). Porcupine was removed from the release build so
-speaker/diarization features ship reliably. Re-add when Picovoice publishes a fix or we disable
-New Architecture for a wake-word-only build variant.
+This uses on-device Apple speech recognition. It works well in the foreground and for
+brief background/lock-screen use, but uses more battery than Porcupine and is less
+precise than a dedicated wake-word model.
 
-## Enable wake word
+## Option B — Picovoice Porcupine (optional, lower battery)
 
-1. Create a free [Picovoice Console](https://console.picovoice.ai/) account
-2. Train **"Hey Atlas"** under Porcupine → download **iOS `.ppn`**
-3. Add the file to `apps/mobile/ios/Atlas/` and include it in the Xcode target
-4. Set env (release build script or `.env`):
+1. Sign up at [console.picovoice.ai](https://console.picovoice.ai/) (individual developer
+   signup — not the enterprise “Talk to Sales” form). Gmail usually works; if blocked,
+   email `hello@picovoice.ai` and ask for a personal developer account.
+2. Add to `server/.env` (gitignored):
 
 ```bash
-EXPO_PUBLIC_WAKE_WORD=1
-EXPO_PUBLIC_PICOVOICE_ACCESS_KEY=your_access_key
-EXPO_PUBLIC_WAKE_KEYWORD_PATH=hey-atlas_ios.ppn
+PICOVOICE_ACCESS_KEY=your_key_here
+# Optional custom model from Picovoice Console:
+# EXPO_PUBLIC_WAKE_KEYWORD_PATH=hey-atlas_ios.ppn
 ```
 
-5. Rebuild: `./scripts/build-ios-release.sh`
+3. Rebuild: `./scripts/build-ios-release.sh`
 
-Until step 2–4 are done, leave wake **Off** or use the built-in `porcupine` test word
-(with `EXPO_PUBLIC_WAKE_KEYWORD_PATH` unset).
+When a Picovoice key is baked into the build, Atlas prefers Porcupine over phrase wake.
+Default built-in keyword is **Jarvis** until you bundle a custom **Hey Atlas** `.ppn`.
 
-## Mac 24/7 wake (Feature C5 — later)
+## Background behavior
 
-Always-on "Hey Atlas" on the Mac server (reliable Jarvis path) + push notification
-to iPhone is planned after iPhone foreground wake is stable.
+- `UIBackgroundModes: audio` keeps the audio session alive while wake is on
+- Works best: app recently used, screen locked briefly, Low Power Mode **off**
+- iOS may still suspend after extended idle — not Siri-grade 24/7 on third-party apps
+- **Mac 24/7 daemon** (roadmap C5) remains the reliable always-on path
+
+## Disable phrase wake
+
+Set `EXPO_PUBLIC_WAKE_PHRASE=0` at build time to require Picovoice only.

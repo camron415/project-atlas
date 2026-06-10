@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   Modal,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -20,6 +21,8 @@ interface SpeakerSettingsModalProps {
   wakeWordEnabled: boolean;
   wakeWordAvailable: boolean;
   wakeWordLabel: string;
+  buildStamp: string;
+  shortcutListenUrl: string;
   onClose: () => void;
   onToggleWakeWord: (enabled: boolean) => void;
 }
@@ -30,6 +33,8 @@ export function SpeakerSettingsModal({
   wakeWordEnabled,
   wakeWordAvailable,
   wakeWordLabel,
+  buildStamp,
+  shortcutListenUrl,
   onClose,
   onToggleWakeWord,
 }: SpeakerSettingsModalProps) {
@@ -115,6 +120,12 @@ export function SpeakerSettingsModal({
             <Text style={styles.secondaryBtnText}>Reset voice ID maps (this session)</Text>
           </Pressable>
 
+          <Text style={styles.help}>
+            Wake listens in the background while the app is idle. Say the keyword to start a voice
+            turn without tapping the mic. Without a Picovoice key, Atlas uses on-device speech
+            recognition and listens for &quot;Hey Atlas&quot;.
+          </Text>
+
           <View style={styles.wakeRow}>
             <Text style={styles.wakeLabel}>Wake word ({wakeWordLabel})</Text>
             <Pressable
@@ -123,16 +134,20 @@ export function SpeakerSettingsModal({
               disabled={!wakeWordAvailable}
             >
               <Text style={styles.wakeToggleText}>
-                {!wakeWordAvailable
-                  ? "Add Picovoice key"
-                  : wakeWordEnabled
-                    ? "On"
-                    : "Off"}
+                {!wakeWordAvailable ? "Unavailable" : wakeWordEnabled ? "On" : "Off"}
               </Text>
             </Pressable>
           </View>
 
+          <Text style={styles.help}>
+            Siri shortcut (requires unlock when phone is locked): Shortcuts → Open URL →{" "}
+            <Text style={styles.mono}>{shortcutListenUrl}</Text>. Prefer wake word below when
+            the app is open. See docs/SHORTCUTS.md.
+          </Text>
+
           {notice && <Text style={styles.notice}>{notice}</Text>}
+
+          <Text style={styles.buildStamp}>Build {buildStamp}</Text>
 
           <Pressable style={styles.closeBtn} onPress={onClose}>
             <Text style={styles.closeBtnText}>Done</Text>
@@ -158,6 +173,7 @@ const styles = StyleSheet.create({
   },
   title: { color: "#e8edf4", fontSize: 18, fontWeight: "600" },
   help: { color: "#8b95a5", fontSize: 13, lineHeight: 18 },
+  mono: { color: "#c5d0de", fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace" },
   row: { gap: 8 },
   rowMeta: { flexDirection: "row", gap: 8, alignItems: "center" },
   role: {
@@ -208,6 +224,7 @@ const styles = StyleSheet.create({
   wakeToggleOn: { backgroundColor: "#3b2f12", borderColor: "#f59e0b" },
   wakeToggleText: { color: "#e8edf4", fontWeight: "600" },
   notice: { color: "#93c5fd", fontSize: 13 },
+  buildStamp: { color: "#5b6675", fontSize: 11, textAlign: "center" },
   closeBtn: {
     marginTop: 4,
     backgroundColor: "#1f6feb",

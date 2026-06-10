@@ -1,0 +1,11 @@
+{
+  "name": "atlas-live-activity",
+  "version": "1.0.0",
+  "description": "Lock screen Live Activity for Atlas voice sessions",
+  "main": "index.ts",
+  "peerDependencies": {
+    "expo": "*",
+    "react": "*",
+    "react-native": "*"
+  }
+}

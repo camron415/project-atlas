@@ -106,6 +106,11 @@ export async function openXaiSttSession(
           }
           resolve();
         }
+        if (event.type === "error" && !upstreamReady) {
+          clearTimeout(timeout);
+          reject(new Error(event.message ?? "STT upstream error"));
+          return;
+        }
         onEvent(event);
       } catch (error) {
         dwarn("stt", "bad message", error);

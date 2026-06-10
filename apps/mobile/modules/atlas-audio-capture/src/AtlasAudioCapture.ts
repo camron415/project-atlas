@@ -12,6 +12,9 @@ type AtlasAudioCaptureEvents = {
 type AtlasAudioCaptureNative = {
   startCapture(): Promise<void>;
   stopCapture(): Promise<void>;
+  startBackgroundHold(): Promise<void>;
+  stopBackgroundHold(): Promise<void>;
+  releaseAudioSession(): Promise<void>;
   isAvailable(): boolean;
   addListener<EventName extends keyof AtlasAudioCaptureEvents>(
     eventName: EventName,
@@ -50,5 +53,25 @@ export async function startNativeAudioCapture(
 export async function stopNativeAudioCapture(): Promise<void> {
   if (nativeModule) {
     await nativeModule.stopCapture();
+  }
+}
+
+export async function startNativeBackgroundHold(): Promise<void> {
+  if (!nativeModule) {
+    throw new Error("AtlasAudioCapture native module is not available");
+  }
+  await nativeModule.startBackgroundHold();
+}
+
+export async function stopNativeBackgroundHold(): Promise<void> {
+  if (nativeModule) {
+    await nativeModule.stopBackgroundHold();
+  }
+}
+
+/** Release playAndRecord so other apps (YouTube, etc.) can resume uninterrupted. */
+export async function releaseNativeAudioSession(): Promise<void> {
+  if (nativeModule?.releaseAudioSession) {
+    await nativeModule.releaseAudioSession();
   }
 }

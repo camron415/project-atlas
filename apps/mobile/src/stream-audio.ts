@@ -8,6 +8,8 @@ import {
   isNativeStreamAudioAvailable,
   startNativeStreamingPlayback,
   stopNativeStreaming,
+  prewarmNativeStreaming,
+  shutdownNativeStreaming,
 } from "atlas-stream-audio";
 import {
   startStreamingPcmPlayback as fallbackStart,
@@ -41,4 +43,30 @@ export async function stopStreamingPlayback(): Promise<void> {
     return;
   }
   await fallbackStop();
+}
+
+/**
+ * Create the playback engine ahead of time, while foreground, so the audio
+ * session is already active before the screen can lock. iOS forbids activating
+ * a session in the background, so this is what makes locked-screen replies work.
+ */
+export async function prewarmStreamingPlayback(sampleRate = 24000): Promise<void> {
+  if (Platform.OS === "ios" && isNativeStreamAudioAvailable()) {
+    try {
+      await prewarmNativeStreaming(sampleRate);
+    } catch (e) {
+      dwarn("audio", "prewarm streaming failed (non-fatal)", e);
+    }
+  }
+}
+
+/** Fully release the persistent playback engine + session when the voice session ends. */
+export async function shutdownStreamingPlayback(): Promise<void> {
+  if (Platform.OS === "ios" && isNativeStreamAudioAvailable()) {
+    try {
+      await shutdownNativeStreaming();
+    } catch (e) {
+      dwarn("audio", "shutdown streaming failed (non-fatal)", e);
+    }
+  }
 }

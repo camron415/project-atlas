@@ -1,0 +1,11 @@
+{
+  "name": "atlas-realtime-playback",
+  "version": "1.0.0",
+  "description": "Gapless PCM16 realtime playback for Path B unified voice",
+  "main": "index.ts",
+  "peerDependencies": {
+    "expo": "*",
+    "react": "*",
+    "react-native": "*"
+  }
+}

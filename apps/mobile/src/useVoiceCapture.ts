@@ -25,11 +25,15 @@ export interface VoiceSubmitMeta {
   sttSpeakerId?: number | null;
 }
 
+export type ListenPhase = "connecting" | "hearing" | "transcribing";
+
 export interface VoiceCaptureOptions {
   onPartial: (text: string) => void;
   onSubmit: (text: string, meta?: VoiceSubmitMeta) => void | Promise<void>;
   onError: (message: string) => void;
   onCaptureEnd?: () => void;
+  /** Grok STT lifecycle — gives immediate feedback before partials arrive. */
+  onListenPhase?: (phase: ListenPhase) => void;
 }
 
 export function useVoiceCapture(options: VoiceCaptureOptions) {

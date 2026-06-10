@@ -106,13 +106,30 @@ export async function startListening(options: ListenOptions = {}): Promise<void>
   });
 }
 
+/** Voice listen loop — expo audio mode only; session category owned by background-audio. */
+export async function applyVoiceAudioMode(options?: { continuousVoice?: boolean }): Promise<void> {
+  await Audio.setAudioModeAsync({
+    allowsRecordingIOS: options?.continuousVoice === true,
+    playsInSilentModeIOS: true,
+    staysActiveInBackground: options?.continuousVoice === true,
+    interruptionModeIOS: options?.continuousVoice
+      ? InterruptionModeIOS.MixWithOthers
+      : InterruptionModeIOS.DoNotMix,
+    interruptionModeAndroid: 1,
+    shouldDuckAndroid: false,
+    playThroughEarpieceAndroid: false,
+  });
+}
+
 /** After STT — hand off to AVAudioEngine (no expo-av playback prep / delay). */
-export async function prepareForNativeStream(): Promise<void> {
+export async function prepareForNativeStream(options?: { continuousVoice?: boolean }): Promise<void> {
   if (Platform.OS === "ios") {
     try {
       ExpoSpeechRecognitionModule.setCategoryIOS({
         category: "playAndRecord",
-        categoryOptions: ["defaultToSpeaker", "allowBluetooth"],
+        categoryOptions: options?.continuousVoice
+          ? ["defaultToSpeaker", "allowBluetooth", "allowBluetoothA2DP"]
+          : ["defaultToSpeaker", "allowBluetooth"],
         mode: "spokenAudio",
       });
     } catch (e) {
@@ -121,10 +138,12 @@ export async function prepareForNativeStream(): Promise<void> {
   }
 
   await Audio.setAudioModeAsync({
-    allowsRecordingIOS: false,
+    allowsRecordingIOS: options?.continuousVoice === true,
     playsInSilentModeIOS: true,
-    staysActiveInBackground: false,
-    interruptionModeIOS: InterruptionModeIOS.DoNotMix,
+    staysActiveInBackground: options?.continuousVoice === true,
+    interruptionModeIOS: options?.continuousVoice
+      ? InterruptionModeIOS.MixWithOthers
+      : InterruptionModeIOS.DoNotMix,
     interruptionModeAndroid: 1,
     shouldDuckAndroid: false,
     playThroughEarpieceAndroid: false,

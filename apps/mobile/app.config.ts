@@ -27,11 +27,12 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       bundleIdentifier: "com.camrontrost.atlas",
       infoPlist: {
         NSMicrophoneUsageDescription:
-          "Atlas needs microphone access so you can speak to it using push-to-talk.",
+          "Atlas uses the microphone for voice commands, optional wake word listening, and conversation with your chief assistant.",
         NSSpeechRecognitionUsageDescription:
           "Atlas uses speech recognition to understand your spoken questions.",
         NSLocationWhenInUseUsageDescription:
           "Atlas uses your location for weather and local search when you ask.",
+        NSSupportsLiveActivities: true,
         UIBackgroundModes: ["audio"],
       },
     },
@@ -42,6 +43,12 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     } as ExpoConfig["android"],
     plugins: [
       "expo-speech-recognition",
+      [
+        "expo-build-properties",
+        {
+          ios: { deploymentTarget: "16.4" },
+        },
+      ],
       [
         withAtlasAts as unknown as string,
         { tsIp: TS_IP, lanIp: LAN_IP, tailnet: TAILNET, tsHost: TS_HOST },

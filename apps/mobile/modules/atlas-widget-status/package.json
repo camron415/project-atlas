@@ -1,0 +1,11 @@
+{
+  "name": "atlas-widget-status",
+  "version": "1.0.0",
+  "description": "Share Atlas voice UI state with the iOS home-screen widget",
+  "main": "index.ts",
+  "peerDependencies": {
+    "expo": "*",
+    "react": "*",
+    "react-native": "*"
+  }
+}

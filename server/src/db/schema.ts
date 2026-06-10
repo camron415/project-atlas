@@ -79,5 +79,26 @@ function migrate(db: Database.Database): void {
       PRIMARY KEY (session_key, stt_speaker_id),
       FOREIGN KEY (profile_slug) REFERENCES speaker_profiles(slug)
     );
+
+    CREATE TABLE IF NOT EXISTS chat_sessions (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL DEFAULT 'New chat',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS chat_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL,
+      client_id TEXT,
+      role TEXT NOT NULL CHECK (role IN ('user', 'atlas')),
+      text TEXT NOT NULL,
+      error INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_chat_messages_session
+      ON chat_messages(session_id, id ASC);
   `);
 }
