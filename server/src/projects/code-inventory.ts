@@ -44,6 +44,10 @@ const PRIORITY_FILENAMES = new Set([
   "ROADMAP.md",
   "HANDOFF.md",
   "PERSONA.md",
+  "PHASE_1_75.md",
+  "PHASE_1_5_CLOSEOUT.md",
+  "VOICE_PHASE4.md",
+  "VOICE_BASELINE.md",
   "package.json",
   "tsconfig.json",
   "app.json",
@@ -97,6 +101,11 @@ function scoreSourceFile(relativePath: string): number {
   let score = 0;
   if (PRIORITY_FILENAMES.has(path.basename(relativePath))) score += 100;
   if (lower.includes("readme") || lower.includes("roadmap") || lower.includes("handoff")) score += 80;
+  if (lower.includes("phase_1") || lower.includes("voice_phase") || lower.includes("voice_baseline")) {
+    score += 95;
+  }
+  if (lower.includes("/inbox/") || lower.startsWith("inbox/")) score += 90;
+  if (lower.includes("/analyst/") || lower.includes("realtime-proxy")) score += 85;
   if (lower.startsWith("docs/")) score += 60;
   if (lower.includes("/src/") || lower.startsWith("src/")) score += 40;
   if (lower.includes("server/") || lower.includes("apps/")) score += 30;

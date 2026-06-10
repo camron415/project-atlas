@@ -613,13 +613,15 @@ httpServer.listen(port, host, () => {
 
   seedSpeakerProfiles(db);
 
-  // Boot-time scan
+  // Boot-time scan — refresh cache when git HEAD changes or no reports yet
   const active = getActiveProjects(registry);
   const snapshots = syncProjectsToDb(db, active, { deep: false });
-  if (!getLatestReports(db).length) {
-    for (const snap of snapshots) {
-      storeProjectReport(db, snap, "boot");
+  const stale = projectsNeedingRefresh(db, snapshots);
+  const toStore = getLatestReports(db).length ? stale : snapshots;
+  if (toStore.length) {
+    for (const snap of toStore) {
+      storeProjectReport(db, snap, stale.length ? "boot-refresh" : "boot");
     }
-    console.log(`Seeded ${snapshots.length} project report(s)`);
+    console.log(`Cached ${toStore.length} project report(s) (git HEAD refresh)`);
   }
 });

@@ -4,6 +4,7 @@ import { PERSONA_REWRITE_PROMPT } from "../persona/filter.js";
 import type { SpeakerProfile } from "../speakers/types.js";
 import { buildInstructionsAddon } from "../speakers/store.js";
 import { ANALYST_CHIEF_INSTRUCTIONS } from "./analyst-instructions.js";
+import { buildServerCapabilities } from "./capabilities.js";
 
 const CHIEF_ROLE = `You are Atlas, Camron's chief assistant and project interface — including this Atlas codebase itself (slug: atlas).
 You help him plan next steps, brainstorm ideas, and break down complex topics in plain language.
@@ -78,6 +79,7 @@ export function buildChiefInstructions(
     VOICE_INTERFACE,
     VOICE_STYLE,
     ANALYST_CHIEF_INSTRUCTIONS,
+    buildServerCapabilities(),
     ...speakerBlocks,
     PERSONA_REFERENCE,
     "## Cached project context",

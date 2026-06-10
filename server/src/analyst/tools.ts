@@ -5,7 +5,7 @@ export const ANALYST_REALTIME_TOOLS: Array<Record<string, unknown>> = [
     type: "function",
     name: "request_analyst_review",
     description:
-      "Enqueue a read-only analyst review of a project repo. ONLY call after Camron explicitly confirms (yes/proceed/go ahead). Never call on first mention — confirm first like Jarvis.",
+      "Enqueue a read-only analyst review of a project repo. Always deep-scans full codebase + recent git. ONLY call after Camron explicitly confirms (yes/proceed/go ahead). Never call on first mention — confirm first like Jarvis.",
     parameters: {
       type: "object",
       properties: {

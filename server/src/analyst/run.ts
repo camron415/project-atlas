@@ -5,21 +5,21 @@ import { chatCompletion } from "../xai/client.js";
 import { AtlasModels } from "../models/router.js";
 import type { ProjectRegistry } from "../projects/registry.js";
 import { getActiveProjects } from "../projects/registry.js";
-import { syncProjectsToDb } from "../projects/scanner.js";
-import {
-  getLatestReportForProject,
-  storeProjectReport,
-} from "../reports/store.js";
-import { synthesizeProjectReport } from "../reports/synthesize.js";
+import { storeProjectReport } from "../reports/store.js";
+import { buildFreshAnalystContext } from "./context.js";
 import { registrySlugForAnalyst, resolveAnalystProject } from "./registry-slugs.js";
 import { refineAnalystFocus } from "./focus.js";
 import { createAnalystJob, getAnalystJob, updateAnalystJob } from "./store.js";
 import type { InboxProjectSlug } from "../inbox/types.js";
+import { buildCodeInventory } from "../projects/code-inventory.js";
+import { snapshotProject } from "../projects/scanner.js";
+import { ANALYST_INVENTORY_OPTIONS } from "./context.js";
 
 export interface AnalystRunInput {
   project: string;
   focus?: string;
   userIntent?: string;
+  /** Analyst always deep-scans; set false only for debugging. */
   deep?: boolean;
 }
 
@@ -35,38 +35,11 @@ function projectDisplayName(registry: ProjectRegistry, registrySlug: string): st
   );
 }
 
-async function ensureReport(
-  deps: AnalystRunDeps,
+function findRegistryProject(
+  registry: ProjectRegistry,
   registrySlug: string,
-  deep: boolean,
-): Promise<string> {
-  const { db, registry } = deps;
-  let report = getLatestReportForProject(db, registrySlug);
-
-  if (report && !deep) {
-    return report.summary;
-  }
-
-  const active = getActiveProjects(registry).filter((p) => p.slug === registrySlug);
-  if (!active.length) {
-    throw new Error(`Project not found in registry: ${registrySlug}`);
-  }
-
-  const snapshots = syncProjectsToDb(db, active, { deep });
-  for (const snap of snapshots) {
-    let enriched = snap;
-    if (deep && enriched.codeInventory && process.env.XAI_API_KEY) {
-      const llmSummary = await synthesizeProjectReport(enriched);
-      if (llmSummary) enriched = { ...enriched, llmSummary };
-    }
-    storeProjectReport(db, enriched, deep ? "deep-scan" : "analyst-refresh");
-  }
-
-  report = getLatestReportForProject(db, registrySlug);
-  if (!report) {
-    throw new Error(`No report available for ${registrySlug}`);
-  }
-  return report.summary;
+): (typeof registry.projects)[number] | undefined {
+  return registry.projects.find((p) => p.slug === registrySlug);
 }
 
 async function synthesizeAnalystBrief(
@@ -78,35 +51,38 @@ async function synthesizeAnalystBrief(
     return `## ${projectName} — ${focus}\n\n_Report synthesis unavailable (no API key)._`;
   }
 
-  const prompt = `You are a read-only technical analyst. Produce a structured briefing for a chief-of-staff voice discussion.
+  const prompt = `You are a read-only technical analyst with full codebase context below. Produce a structured briefing for a chief-of-staff voice discussion.
 
 Project: ${projectName}
 Focus: ${focus}
 
 Output markdown with these sections only:
 ## Headline (one sentence)
-## Key findings (3-5 bullets, grounded in context)
-## Risks or gaps
-## Suggested next steps (3-5 actionable items)
+## Key findings (3-5 bullets — cite specific files or recent git commits when possible)
+## Risks or gaps (concrete, with file paths if known)
+## Suggested next steps (3-5 actionable items for a planning session — no code execution)
 
 Rules:
-- Read-only analysis only — no code changes proposed as commands
-- Only state facts supported by the context below
-- If context is shallow, say what a deeper scan would need
+- Read-only analysis only
+- Use "Git activity" and "Recent commits" to describe what changed lately
+- Use "Canonical docs" and "Priority implementation files" for phase/status truth
+- If PHASE_1_75.md shows implemented steps checked off, say Phase 1.75 is active — do not claim it is missing
+- Cite real file paths and examples from source excerpts when recommending fixes
+- If uncertain, say what file you would inspect next
 
-## Cached project context
-${reportContext.slice(0, 24_000)}`;
+## Full analyst context
+${reportContext.slice(0, 88_000)}`;
 
   return chatCompletion(
     [
       {
         role: "system",
         content:
-          "You are a concise technical analyst. Be specific. No fluff. Markdown only.",
+          "You are a precise technical analyst. Ground every claim in the provided context. Markdown only.",
       },
       { role: "user", content: prompt },
     ],
-    { model: AtlasModels.analyst(), temperature: 0.3, maxTokens: 1200 },
+    { model: AtlasModels.analyst(), temperature: 0.25, maxTokens: 1600 },
   );
 }
 
@@ -129,6 +105,11 @@ export async function runAnalystJob(
     }
 
     const registrySlug = registrySlugForAnalyst(analystProject);
+    const project = findRegistryProject(deps.registry, registrySlug);
+    if (!project?.path) {
+      throw new Error(`Project not found in registry: ${registrySlug}`);
+    }
+
     const projectName = projectDisplayName(deps.registry, registrySlug);
 
     const focus = await refineAnalystFocus(
@@ -137,10 +118,23 @@ export async function runAnalystJob(
     );
 
     updateAnalystJob(deps.db, jobId, {
-      progress: job.deep ? "Running deep scan" : "Reading cached report",
+      progress: "Deep scanning repo + git history",
     });
 
-    const reportContext = await ensureReport(deps, registrySlug, Boolean(job.deep));
+    const reportContext = await buildFreshAnalystContext(deps.db, project);
+
+    // Refresh SQLite cache so chief path also benefits
+    const snap = snapshotProject(project, { deep: false });
+    if (snap) {
+      storeProjectReport(
+        deps.db,
+        {
+          ...snap,
+          codeInventory: buildCodeInventory(project.path, ANALYST_INVENTORY_OPTIONS),
+        },
+        "analyst-deep",
+      );
+    }
 
     updateAnalystJob(deps.db, jobId, { progress: "Synthesizing analyst brief" });
 
@@ -177,14 +171,13 @@ export function enqueueAnalystJob(
     throw new Error(`Unknown project "${input.project}" — use atlas, vocallearn, or career`);
   }
 
-  const registrySlug = registrySlugForAnalyst(project);
   const focus = input.focus?.trim() || input.userIntent?.trim() || "General project review";
 
   const job = createAnalystJob(deps.db, {
     projectSlug: project,
     focus,
     userIntent: input.userIntent,
-    deep: input.deep,
+    deep: input.deep !== false,
   });
 
   void runAnalystJob(deps, job.id);

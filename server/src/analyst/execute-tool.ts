@@ -69,7 +69,7 @@ export async function executeAnalystTool(
     const project = String(args.project ?? "");
     const focus = String(args.focus ?? "").trim();
     const userIntent = String(args.user_intent_summary ?? focus).trim();
-    const deep = Boolean(args.deep);
+    const deep = args.deep !== false;
 
     const { jobId, project: resolved } = enqueueAnalystJob(deps, {
       project,

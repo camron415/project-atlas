@@ -13,7 +13,12 @@
         "docs/HANDOFF.md",
         "docs/ROADMAP.md",
         "docs/PERSONA.md",
-        "docs/VOICE_ARCHITECTURE.md"
+        "docs/VOICE_ARCHITECTURE.md",
+        "docs/PHASE_1_75.md",
+        "docs/PHASE_1_5_CLOSEOUT.md",
+        "docs/VOICE_PHASE4.md",
+        "docs/VOICE_BASELINE.md",
+        "docs/inbox/README.md"
       ],
       "reportCadence": "daily",
       "workers": []
@@ -25,7 +30,13 @@
       "status": "active",
       "path": "/Users/camrontrost/Documents/Macbook-Documents/vocalLearn",
       "targetPath": "/Users/camrontrost/Documents/Macbook-Documents/projects/vocalLearn",
-      "roadmapFiles": ["README.md", "HANDOFF.md", "ROADMAP.md"],
+      "roadmapFiles": [
+        "README.md",
+        "HANDOFF.md",
+        "ROADMAP.md",
+        "docs/ROADMAP.md",
+        "docs/HANDOFF.md"
+      ],
       "reportCadence": "daily",
       "workers": [
         {
@@ -44,7 +55,7 @@
       "status": "active",
       "path": "/Users/camrontrost/Documents/career-planning-roadmap/career-dashboard",
       "targetPath": "/Users/camrontrost/Documents/Macbook-Documents/projects/career-planning-roadmap/career-dashboard",
-      "roadmapFiles": ["README.md"],
+      "roadmapFiles": ["README.md", "docs/ROADMAP.md", "HANDOFF.md"],
       "reportCadence": "daily",
       "workers": []
     },
