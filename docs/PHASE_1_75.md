@@ -77,10 +77,11 @@ Chief announces analyst status in voice: *"Reviewing VocalLearn…"* → *"Repor
 ## Implementation steps (build in order)
 
 ### Step 1 — Inbox file format + storage (small, high value)
-- [ ] `server/src/inbox/store.ts` — write markdown to configured repo paths
-- [ ] `POST /inbox` — `{ project, title, body, sessionId? }`
-- [ ] `docs/inbox/README.md` — schema for Cursor handoff
-- [ ] Registry: map `vocallearn` | `career` | `atlas` → filesystem paths
+- [x] `server/src/inbox/store.ts` — write markdown to configured repo paths
+- [x] `POST /inbox` — `{ project, title, body, sessionId? }`
+- [x] `POST /inbox/from-session` — export saved chat session to inbox markdown
+- [x] `docs/inbox/README.md` — schema for Cursor handoff
+- [x] Registry: map `vocallearn` | `career` | `atlas` → filesystem paths
 
 **Test:** `curl POST /inbox` → file appears in repo.
 

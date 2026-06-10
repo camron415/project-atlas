@@ -51,6 +51,8 @@ import {
   listChatMessages,
   listChatSessions,
 } from "./sessions/store.js";
+import { writeInboxArtifact } from "./inbox/store.js";
+import type { InboxProjectSlug } from "./inbox/types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dataDir =
@@ -463,6 +465,93 @@ app.delete("/sessions/:id", (req, res) => {
     return;
   }
   res.json({ ok: true });
+});
+
+const INBOX_PROJECTS = new Set<InboxProjectSlug>(["atlas", "vocallearn", "career"]);
+
+app.post("/inbox", (req, res) => {
+  const project = req.body?.project as InboxProjectSlug | undefined;
+  const title = String(req.body?.title ?? "").trim();
+  const body = String(req.body?.body ?? "").trim();
+
+  if (!project || !INBOX_PROJECTS.has(project)) {
+    res.status(400).json({ error: "project must be atlas, vocallearn, or career" });
+    return;
+  }
+  if (!title || !body) {
+    res.status(400).json({ error: "title and body are required" });
+    return;
+  }
+
+  try {
+    const result = writeInboxArtifact(registry, {
+      project,
+      title,
+      body,
+      sessionId:
+        typeof req.body?.sessionId === "string" ? req.body.sessionId.trim() : undefined,
+      analystJobId:
+        typeof req.body?.analystJobId === "string" ? req.body.analystJobId.trim() : undefined,
+    });
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "inbox write failed",
+    });
+  }
+});
+
+/** Build inbox markdown from a saved chat session (Phase 1.75 handoff). */
+app.post("/inbox/from-session", (req, res) => {
+  const sessionId = String(req.body?.sessionId ?? "").trim();
+  const project = req.body?.project as InboxProjectSlug | undefined;
+  const title = String(req.body?.title ?? "").trim();
+  const extraBody = String(req.body?.extraBody ?? "").trim();
+
+  if (!sessionId) {
+    res.status(400).json({ error: "sessionId is required" });
+    return;
+  }
+  if (!project || !INBOX_PROJECTS.has(project)) {
+    res.status(400).json({ error: "project must be atlas, vocallearn, or career" });
+    return;
+  }
+
+  const session = getChatSession(db, sessionId);
+  if (!session) {
+    res.status(404).json({ error: "session not found" });
+    return;
+  }
+
+  const messages = listChatMessages(db, sessionId);
+  const transcript = messages
+    .map((m) => `**${m.role === "user" ? "You" : "Atlas"}:** ${m.text.trim()}`)
+    .join("\n\n");
+
+  const body = [
+    "## Summary",
+    title || session.title,
+    "",
+    "## Conversation",
+    transcript,
+    extraBody ? `\n## Notes\n${extraBody}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  try {
+    const result = writeInboxArtifact(registry, {
+      project,
+      title: title || session.title || "Atlas session",
+      body,
+      sessionId,
+    });
+    res.json({ ...result, messageCount: messages.length });
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "inbox write failed",
+    });
+  }
 });
 
 const httpServer = http.createServer(app);
