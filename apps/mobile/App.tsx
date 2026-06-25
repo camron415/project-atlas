@@ -21,10 +21,13 @@ import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-cont
 import {
   askChiefDeep,
   askChiefPlanVoice,
+  beginStandup,
   checkHealth,
+  endStandup,
   fetchChiefSession,
   fetchInboxList,
   fetchRealtimeClientSecret,
+  fetchStandupStatus,
   fetchSttConfig,
   fetchTtsAudio,
   type InboxListEntry,
@@ -143,7 +146,7 @@ type Status = "idle" | "listening" | "thinking" | "speaking";
 type Connection = "unknown" | "online" | "offline";
 
 /** Bumped each release — confirm in app header after install. */
-const APP_BUILD_STAMP = "2026-06-12-return-economy";
+const APP_BUILD_STAMP = "2026-06-26-standup-v1";
 
 function formatListenError(error: unknown): string {
   const msg = error instanceof Error ? error.message : String(error);
@@ -214,6 +217,10 @@ function AtlasApp() {
     error?: string;
   } | null>(null);
   const [inboxFiles, setInboxFiles] = useState<InboxListEntry[]>([]);
+  const [standupReady, setStandupReady] = useState(false);
+  const [standupActive, setStandupActive] = useState(false);
+  const standupActiveRef = useRef(false);
+  standupActiveRef.current = standupActive;
   const [monologueListening, setMonologueListening] = useState(false);
 
   const listRef = useRef<FlatList<Message>>(null);
@@ -346,6 +353,16 @@ function AtlasApp() {
     [applySessionMessages, loadChatSession, refreshChatSessionList],
   );
 
+  const refreshStandupStatus = useCallback(async () => {
+    try {
+      const status = await fetchStandupStatus(chatSessionIdRef.current);
+      setStandupReady(status.ready);
+      setStandupActive(status.standupActive);
+    } catch {
+      setStandupReady(false);
+    }
+  }, []);
+
   const connectToServer = useCallback(async () => {
     setConnectionError(null);
     try {
@@ -363,6 +380,7 @@ function AtlasApp() {
       }
       void getLocationContext().catch(() => {});
       void refreshChatSessionList(true);
+      void refreshStandupStatus();
     } catch (error) {
       setConnection("offline");
       const detail =
@@ -374,7 +392,7 @@ function AtlasApp() {
           : "";
       setConnectionError(`${detail}${hint}`);
     }
-  }, [refreshChatSessionList]);
+  }, [refreshChatSessionList, refreshStandupStatus]);
 
   const refreshHealth = useCallback(() => connectToServer(), [connectToServer]);
 
@@ -409,6 +427,39 @@ function AtlasApp() {
       listRef.current?.scrollToEnd({ animated: true });
     });
   }, []);
+
+  const handleStartStandup = useCallback(async () => {
+    try {
+      const result = await beginStandup(chatSessionIdRef.current);
+      setStandupActive(true);
+      setStandupReady(true);
+      setHistoryOpen(false);
+      setNotice("Standup started — speak when ready.");
+      pushMessage({
+        id: makeId(),
+        role: "atlas",
+        text: result.opening,
+      });
+      scrollToEnd();
+      void fetchChiefSession().then((session) => {
+        instructionsRef.current = session.instructions;
+      });
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not start standup");
+    }
+  }, [pushMessage, scrollToEnd]);
+
+  const handleEndStandup = useCallback(async () => {
+    try {
+      await endStandup("Standup ended from app.");
+      setStandupActive(false);
+      setNotice("Standup closed — decisions saved.");
+      void refreshStandupStatus();
+      void refreshChatSessionList(true);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not end standup");
+    }
+  }, [refreshChatSessionList, refreshStandupStatus]);
 
   useEffect(() => {
     scrollToEnd();
@@ -516,6 +567,7 @@ function AtlasApp() {
         interrupted,
         deep,
         skipTts: true,
+        standupMode: standupActiveRef.current,
         signal: controller.signal,
       });
       if (controller.signal.aborted) return;
@@ -1559,6 +1611,14 @@ function AtlasApp() {
         visible={historyOpen}
         sessions={chatSessions}
         inboxFiles={inboxFiles}
+        standupReady={standupReady}
+        standupActive={standupActive}
+        onStartStandup={() => {
+          void handleStartStandup();
+        }}
+        onEndStandup={() => {
+          void handleEndStandup();
+        }}
         activeSessionId={chatSessionId}
         onClose={() => setHistoryOpen(false)}
         onSelect={(id) => {

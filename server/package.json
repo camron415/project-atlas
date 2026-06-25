@@ -12,12 +12,15 @@
     "refresh-reports": "tsx src/cli/refresh-reports.ts",
     "analyst": "tsx src/cli/analyst.ts",
     "morning-brief": "tsx src/cli/morning-brief.ts",
+    "manager": "tsx src/cli/manager.ts",
     "test:morning-brief": "tsx src/morning-brief/run.test.ts",
+    "test:manager": "tsx src/managers/run.test.ts",
     "test:stt": "tsx src/xai/stt.test.ts",
     "test:speakers": "tsx src/speakers/store.test.ts",
     "test:inbox": "tsx src/inbox/store.test.ts",
     "test:routing": "tsx src/voice/routing.test.ts",
-    "test:search": "tsx src/context/search.test.ts"
+    "test:search": "tsx src/context/search.test.ts",
+    "test:cost": "tsx src/cost/ledger.test.ts"
   },
   "dependencies": {
     "better-sqlite3": "^11.9.1",

@@ -1,4 +1,5 @@
 import { AtlasModels } from "../models/router.js";
+import { recordApiUsage } from "../cost/ledger.js";
 
 const XAI_API_URL = process.env.XAI_API_URL ?? "https://api.x.ai/v1";
 
@@ -12,6 +13,7 @@ export interface ResponsesOptions {
   model?: string;
   maxOutputTokens?: number;
   tools?: Array<{ type: string }>;
+  task?: string;
 }
 
 function extractOutputText(data: Record<string, unknown>): string {
@@ -59,5 +61,21 @@ export async function responsesCompletion(
   }
 
   const data = (await response.json()) as Record<string, unknown>;
+  const model = options.model ?? AtlasModels.fast();
+  const usage = data.usage as
+    | { input_tokens?: number; output_tokens?: number; prompt_tokens?: number; completion_tokens?: number }
+    | undefined;
+  const inputTokens = usage?.input_tokens ?? usage?.prompt_tokens ?? 0;
+  const outputTokens = usage?.output_tokens ?? usage?.completion_tokens ?? 0;
+  if (inputTokens > 0 || outputTokens > 0) {
+    recordApiUsage({
+      task: options.task ?? "responses",
+      provider: "xai",
+      model,
+      inputTokens,
+      outputTokens,
+      estimatedUsd: 0,
+    });
+  }
   return extractOutputText(data);
 }

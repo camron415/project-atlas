@@ -77,6 +77,31 @@ function indexInboxFiles(
   return count;
 }
 
+function indexAtlasOrchestratorDocs(db: Database.Database, registry: ProjectRegistry): number {
+  const atlas = getActiveProjects(registry).find((p) => p.slug === "atlas");
+  if (!atlas?.path) return 0;
+  const rels = [
+    "docs/MANAGER_CHARTER.md",
+    "docs/STANDUP_FLOW.md",
+    "docs/PHASE_2_KICKOFF.md",
+    "docs/managers/PERSONAS.md",
+    "docs/managers/VOCALLEARN_POLICY.md",
+    "docs/managers/CAREER_POLICY.md",
+    "docs/managers/ATLAS_POLICY.md",
+    "docs/STANDUP_IMPLEMENTATION.md",
+    "docs/ROADMAP.md",
+  ];
+  let count = 0;
+  for (const rel of rels) {
+    const filePath = path.join(atlas.path!, rel);
+    const body = readFileSafe(filePath);
+    if (!body) continue;
+    insertDoc(db, "atlas:standup-doc", filePath, body);
+    count++;
+  }
+  return count;
+}
+
 function indexKeyDocs(db: Database.Database, registry: ProjectRegistry): number {
   let count = 0;
   for (const project of getActiveProjects(registry)) {
@@ -108,6 +133,7 @@ export function rebuildContextIndex(
   }
   count += indexInboxFiles(db, registry);
   count += indexKeyDocs(db, registry);
+  count += indexAtlasOrchestratorDocs(db, registry);
   return count;
 }
 

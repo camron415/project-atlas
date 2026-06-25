@@ -1,22 +1,18 @@
-import { describe, expect, it } from "vitest";
+import assert from "node:assert/strict";
 import { detectLanIp, resolveLanIp } from "./lan-ip.js";
 
-describe("detectLanIp", () => {
-  it("returns a non-tailscale IPv4 when interfaces exist", () => {
-    const ip = detectLanIp();
-    if (ip) {
-      expect(ip).toMatch(/^\d+\.\d+\.\d+\.\d+$/);
-      expect(ip.startsWith("100.")).toBe(false);
-    }
-  });
+const detected = detectLanIp();
+if (detected) {
+  assert.match(detected, /^\d+\.\d+\.\d+\.\d+$/);
+  assert.equal(detected.startsWith("100."), false);
+}
 
-  it("resolveLanIp prefers detected over env", () => {
-    const prev = process.env.ATLAS_LAN_IP;
-    process.env.ATLAS_LAN_IP = "10.0.0.1";
-    const ip = resolveLanIp();
-    process.env.ATLAS_LAN_IP = prev;
-    if (detectLanIp()) {
-      expect(ip).toBe(detectLanIp());
-    }
-  });
-});
+const prev = process.env.ATLAS_LAN_IP;
+process.env.ATLAS_LAN_IP = "10.0.0.1";
+const resolved = resolveLanIp();
+process.env.ATLAS_LAN_IP = prev;
+if (detected) {
+  assert.equal(resolved, detected);
+}
+
+console.log("network/lan-ip.test.ts: ok");

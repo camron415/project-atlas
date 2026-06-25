@@ -8,6 +8,9 @@ import type { ChatTurn } from "../chief/respond.js";
 import { isCancel, stripMessageForRouting } from "./routing.js";
 import { executeVoiceTool, VOICE_CHIEF_TOOLS } from "./tools.js";
 import { sanitizeVoiceReply } from "./voice-sanitize.js";
+import { buildStandupMemoryBlock } from "../standup/context.js";
+import { STANDUP_MODERATOR_ADDON } from "../standup/instructions.js";
+import { isStandupActive } from "../standup/session-state.js";
 
 export interface PlanVoiceTurnRequest {
   message: string;
@@ -18,6 +21,8 @@ export interface PlanVoiceTurnRequest {
   research?: boolean;
   /** Client speaks via per-turn Realtime — skip server TTS. */
   skipTts?: boolean;
+  /** Daily standup moderator mode (app-initiated). */
+  standupMode?: boolean;
 }
 
 export interface PlanVoiceTurnReply {
@@ -138,10 +143,16 @@ async function runVoiceChiefLoop(
   const maxTokens = deep ? 800 : 400;
   const model = deep ? AtlasModels.deep() : AtlasModels.fast();
 
+  const standupOn =
+    Boolean(req.standupMode) || isStandupActive(req.chatSessionId ?? null);
+  const standupBlock = standupOn
+    ? `${STANDUP_MODERATOR_ADDON}\n\n${buildStandupMemoryBlock(deps.db, deps.registry)}`
+    : buildStandupMemoryBlock(deps.db, deps.registry);
+
   const messages: ChatMessage[] = [
     {
       role: "system",
-      content: `${VOICE_CHIEF_SYSTEM}\n\n## Context manifest\n${buildManifestBlock(deps.db)}\n\n${VOICE_BREVITY}`,
+      content: `${VOICE_CHIEF_SYSTEM}\n\n${standupBlock}\n\n## Context manifest\n${buildManifestBlock(deps.db)}\n\n${VOICE_BREVITY}`,
     },
     ...history.map((turn) => ({
       role: turn.role,
@@ -186,6 +197,7 @@ async function runVoiceChiefLoop(
       maxTokens,
       tools: VOICE_CHIEF_TOOLS,
       temperature: 0.45,
+      task: "voice-chief",
     });
 
     if (!result.toolCalls.length) {
@@ -217,6 +229,7 @@ async function runVoiceChiefLoop(
         model,
         maxTokens,
         temperature: 0.45,
+        task: "voice-chief",
       });
       finalText = last.content;
     }

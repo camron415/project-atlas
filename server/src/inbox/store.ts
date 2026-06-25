@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import type Database from "better-sqlite3";
 import type { ProjectRegistry } from "../projects/registry.js";
 import { getActiveProjects } from "../projects/registry.js";
 import type { InboxProjectSlug, InboxWriteRequest, InboxWriteResult } from "./types.js";
@@ -49,6 +50,7 @@ export function formatInboxMarkdown(
 export function writeInboxArtifact(
   registry: ProjectRegistry,
   req: InboxWriteRequest,
+  db?: Database.Database,
 ): InboxWriteResult {
   const project = req.project;
   if (!project || !req.title?.trim() || !req.body?.trim()) {
@@ -72,6 +74,12 @@ export function writeInboxArtifact(
 
   const markdown = formatInboxMarkdown(req, writtenAt);
   fs.writeFileSync(finalPath, markdown, "utf8");
+
+  if (db) {
+    void import("../standup/fts-refresh.js").then(({ refreshStandupContextIndex }) =>
+      refreshStandupContextIndex(db, registry),
+    );
+  }
 
   return {
     path: finalPath,

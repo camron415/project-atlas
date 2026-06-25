@@ -19,6 +19,10 @@ interface Props {
   visible: boolean;
   sessions: ChatSessionMeta[];
   inboxFiles?: InboxListEntry[];
+  standupReady?: boolean;
+  standupActive?: boolean;
+  onStartStandup?: () => void;
+  onEndStandup?: () => void;
   activeSessionId: string | null;
   onClose: () => void;
   onSelect: (sessionId: string) => void;
@@ -140,6 +144,10 @@ export function ChatHistoryDrawer({
   visible,
   sessions,
   inboxFiles = [],
+  standupReady = false,
+  standupActive = false,
+  onStartStandup,
+  onEndStandup,
   activeSessionId,
   onClose,
   onSelect,
@@ -167,6 +175,29 @@ export function ChatHistoryDrawer({
         <Pressable style={styles.newBtn} onPress={onNewChat}>
           <Text style={styles.newBtnText}>+ New conversation</Text>
         </Pressable>
+
+        <Pressable style={styles.newBtn} onPress={onNewChat}>
+          <Text style={styles.newBtnText}>+ New conversation</Text>
+        </Pressable>
+
+        <View style={styles.inboxSection}>
+          <Text style={styles.inboxHeading}>Daily standup</Text>
+          {standupActive ? (
+            <Pressable style={styles.standupBtnActive} onPress={onEndStandup}>
+              <Text style={styles.standupBtnText}>End standup</Text>
+            </Pressable>
+          ) : (
+            <Pressable
+              style={[styles.standupBtn, !standupReady && styles.standupBtnDisabled]}
+              onPress={standupReady ? onStartStandup : undefined}
+              disabled={!standupReady}
+            >
+              <Text style={styles.standupBtnText}>
+                {standupReady ? "Start standup" : "Standup prep not ready"}
+              </Text>
+            </Pressable>
+          )}
+        </View>
 
         {inboxFiles.length > 0 ? (
           <View style={styles.inboxSection}>
@@ -262,6 +293,35 @@ const styles = StyleSheet.create({
     color: "#e8edf5",
     fontSize: 15,
     fontWeight: "600",
+  },
+  standupBtn: {
+    marginTop: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    backgroundColor: "#1a3a2a",
+    borderWidth: 1,
+    borderColor: "#2d6a4f",
+  },
+  standupBtnActive: {
+    marginTop: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    backgroundColor: "#3a1a1a",
+    borderWidth: 1,
+    borderColor: "#6a2d2d",
+  },
+  standupBtnDisabled: {
+    opacity: 0.5,
+    backgroundColor: "#1e2a3d",
+    borderColor: "#334155",
+  },
+  standupBtnText: {
+    color: "#e8edf5",
+    fontSize: 14,
+    fontWeight: "600",
+    textAlign: "center",
   },
   inboxSection: {
     marginHorizontal: 16,

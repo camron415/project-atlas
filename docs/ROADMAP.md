@@ -47,13 +47,17 @@ Cheap road mode: Grok STT → `/voice/plan-turn` → server TTS. See `docs/VOICE
 
 **Autonomy v0:** Morning brief scheduler (`ATLAS_MORNING_BRIEF=1`).
 
-## Phase 2 — Managers + proactive Atlas (next)
+## Phase 2 — Managers + proactive Atlas (in progress)
 
-- [ ] Per-project manager agents
-- [ ] Scheduled reports
-- [ ] Proactive Mac notifications + spoken briefings
-- [ ] iPhone push notifications (tap to hear Atlas)
-- [ ] Adaptive model router (fast vs deep)
+**Kickoff:** `docs/PHASE_2_KICKOFF.md` (research + execution waves)
+
+- [x] Wave 0 — cost ledger, provider interface, launchd 24/7
+- [x] Wave 1 — VocalLearn manager + daily inbox
+- [ ] Wave 2 — morning brief expansion + Mac notifications
+- [ ] Wave 3 — broke alerts (tests / CI)
+- [ ] Wave 4 — Career manager
+- [ ] Wave 5 — scale, iPhone push, optional briefing Realtime
+- [ ] Adaptive model router (multi-provider for text tasks)
 
 ## Phase 3 — Autonomous workers
 

@@ -3,6 +3,8 @@ import { buildChiefContext } from "../reports/store.js";
 import { chatCompletion, rewriteWithPersona } from "../xai/client.js";
 import { responsesCompletion } from "../xai/responses.js";
 import { AtlasModels } from "../models/router.js";
+import { loadRegistry } from "../projects/registry.js";
+import { buildStandupMemoryBlock } from "../standup/context.js";
 import {
   looksDeep as detectDeep,
   looksPlanning as detectPlanning,
@@ -75,7 +77,9 @@ export async function answerChiefMessage(
 ): Promise<ChiefReplyMeta> {
   const userMessage = request.message.trim();
   const history = normalizeHistory(request.history);
+  const registry = loadRegistry();
   const context = buildChiefContext(db);
+  const standupMemory = buildStandupMemoryBlock(db, registry);
   const deep = request.voice
     ? Boolean(request.deep) || detectDeep(userMessage)
     : Boolean(request.deep) ||
@@ -105,7 +109,7 @@ export async function answerChiefMessage(
   const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
     {
       role: "system",
-      content: `${CHIEF_SYSTEM}${voiceHint}${deepHint}${researchHint}\n\n## Cached project context\n${context}`,
+      content: `${CHIEF_SYSTEM}${voiceHint}${deepHint}${researchHint}\n\n${standupMemory}\n\n## Cached project context\n${context}`,
     },
     ...history.map((turn) => ({
       role: turn.role,
@@ -123,10 +127,12 @@ export async function answerChiefMessage(
           model: deep ? deepModel : fastModel,
           maxOutputTokens: request.voice ? (deep ? 800 : 600) : deep ? 1600 : 1000,
           tools: [{ type: "web_search" }],
+          task: research ? "chief-research" : "chief-deep",
         })
       : await chatCompletion(messages, {
           model: fastModel,
           maxTokens: request.voice ? voiceMaxTokens : textMaxTokens,
+          task: "chief",
         });
   const filtered = request.skipPersona ? raw.trim() : await rewriteWithPersona(raw);
 

@@ -41,7 +41,7 @@ ${inventoryBlock}`;
         },
         { role: "user", content: prompt },
       ],
-      { model: AtlasModels.scan(), maxTokens: 1400, temperature: 0.3 },
+      { model: AtlasModels.scan(), maxTokens: 1400, temperature: 0.3, task: "scan" },
     );
   } catch {
     return null;

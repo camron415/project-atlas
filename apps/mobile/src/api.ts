@@ -266,6 +266,49 @@ export async function fetchInboxList(
 }
 
 /** Economy voice turn: chief + optional analyst/inbox actions + TTS (no Realtime API). */
+export interface StandupStatus {
+  date: string;
+  standupActive: boolean;
+  ready: boolean;
+  reportingCount: number;
+  preps: Array<{
+    project: string;
+    managerName: string;
+    ready: boolean;
+    skip: boolean;
+    path: string | null;
+  }>;
+  openingHint: string;
+}
+
+export async function fetchStandupStatus(
+  chatSessionId?: string | null,
+): Promise<StandupStatus> {
+  const q = chatSessionId ? `?chatSessionId=${encodeURIComponent(chatSessionId)}` : "";
+  return getJson<StandupStatus>(`/standup/status${q}`);
+}
+
+export async function beginStandup(
+  chatSessionId?: string | null,
+): Promise<{ ok: boolean; standupActive: boolean; opening: string }> {
+  return getJson("/standup/begin", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chatSessionId: chatSessionId ?? undefined }),
+  });
+}
+
+export async function endStandup(
+  summary: string,
+  decisions: Array<{ project: string; text: string; approvalDays?: number }> = [],
+): Promise<{ ok: boolean; path: string }> {
+  return getJson("/standup/end", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ summary, decisions }),
+  });
+}
+
 export async function askChiefPlanVoice(
   message: string,
   history: ChatTurn[],
@@ -275,6 +318,7 @@ export async function askChiefPlanVoice(
     deep?: boolean;
     research?: boolean;
     skipTts?: boolean;
+    standupMode?: boolean;
     signal?: AbortSignal;
   } = {},
 ): Promise<PlanVoiceTurnReply> {
@@ -289,6 +333,7 @@ export async function askChiefPlanVoice(
       deep: options.deep ?? false,
       research: options.research ?? false,
       skipTts: options.skipTts ?? false,
+      standupMode: options.standupMode ?? false,
     }),
     signal: options.signal,
   });

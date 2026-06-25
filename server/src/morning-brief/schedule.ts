@@ -35,6 +35,23 @@ function readLastRunDate(dataDir: string): string | null {
   }
 }
 
+export function getMorningBriefSchedulerStatus(dataDir: string): {
+  enabled: boolean;
+  hour: number;
+  minute: number;
+  projects: string[];
+  lastRunDate: string | null;
+} {
+  const enabled = process.env.ATLAS_MORNING_BRIEF === "1";
+  return {
+    enabled,
+    hour: morningBriefHour(),
+    minute: morningBriefMinute(),
+    projects: enabled ? parseMorningBriefProjects() : [],
+    lastRunDate: enabled ? readLastRunDate(dataDir) : null,
+  };
+}
+
 function writeLastRunDate(dataDir: string, dateKey: string): void {
   fs.mkdirSync(dataDir, { recursive: true });
   fs.writeFileSync(lastRunPath(dataDir), `${dateKey}\n`, "utf8");

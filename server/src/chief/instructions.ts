@@ -5,6 +5,7 @@ import type { SpeakerProfile } from "../speakers/types.js";
 import { buildInstructionsAddon } from "../speakers/store.js";
 import { ANALYST_CHIEF_INSTRUCTIONS } from "./analyst-instructions.js";
 import { buildServerCapabilities } from "./capabilities.js";
+import { buildStandupMemoryBlock } from "../standup/context.js";
 
 const CHIEF_ROLE = `You are Atlas, Camron's chief assistant and project interface — including this Atlas codebase itself (slug: atlas).
 You help him plan next steps, brainstorm ideas, and break down complex topics in plain language.
@@ -64,6 +65,7 @@ ${PERSONA_REWRITE_PROMPT.replace("{raw_response}", "[your factual answer here]")
 export function buildChiefInstructions(
   db: Database.Database,
   speaker?: SpeakerProfile | null,
+  registry?: import("../projects/registry.js").ProjectRegistry | null,
 ): string {
   const context = buildChiefContext(db);
   const speakerBlocks: string[] = [];
@@ -80,6 +82,7 @@ export function buildChiefInstructions(
     VOICE_STYLE,
     ANALYST_CHIEF_INSTRUCTIONS,
     buildServerCapabilities(),
+    ...(registry ? [buildStandupMemoryBlock(db, registry)] : []),
     ...speakerBlocks,
     PERSONA_REFERENCE,
     "## Cached project context",

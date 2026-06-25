@@ -82,7 +82,7 @@ ${reportContext.slice(0, 88_000)}`;
       },
       { role: "user", content: prompt },
     ],
-    { model: AtlasModels.analyst(), temperature: 0.25, maxTokens: 1600 },
+    { model: AtlasModels.analyst(), temperature: 0.25, maxTokens: 1600, task: "analyst" },
   );
 }
 

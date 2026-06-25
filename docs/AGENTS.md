@@ -11,9 +11,14 @@
 
 Generates daily summaries from:
 
-- `ROADMAP.md`, `HANDOFF.md`, git log
-- Open issues / recent commits
-- Build/deployment status when available
+- `ROADMAP.md`, `HANDOFF.md`, git log (via `getGitRecentContext`)
+- Analyst deep scan with manager-specific focus
+- Optional `npm test` when `ATLAS_MANAGER_RUN_TESTS=1`
+- Writes `vocalLearn/inbox/YYYY-MM-DD-manager.md`
+
+**CLI:** `npm run manager -- vocallearn` or `./scripts/manager.sh vocallearn`
+
+**Schedule:** `ATLAS_MANAGER=1`, default 7:15 AM local (after morning brief).
 
 ### VocalLearn Visual QA Worker (future)
 

@@ -15,7 +15,7 @@ export function detectLanIp(): string | null {
 }
 
 function firstPublicV4(
-  entries: NodeJS.DictArray<NodeJS.NetworkInterfaceInfo> | undefined,
+  entries: ReturnType<typeof os.networkInterfaces>[string],
 ): string | null {
   if (!entries) return null;
   for (const addr of entries) {

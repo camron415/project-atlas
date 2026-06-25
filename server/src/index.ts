@@ -55,8 +55,16 @@ import { listInboxArtifacts, writeInboxArtifact } from "./inbox/store.js";
 import type { InboxProjectSlug } from "./inbox/types.js";
 import { enqueueAnalystJob } from "./analyst/run.js";
 import { getAnalystJob } from "./analyst/store.js";
-import { startMorningBriefScheduler } from "./morning-brief/schedule.js";
+import { startMorningBriefScheduler, getMorningBriefSchedulerStatus } from "./morning-brief/schedule.js";
+import { startManagerScheduler, getManagerSchedulerStatus } from "./managers/schedule.js";
 import { resolveLanIp } from "./network/lan-ip.js";
+import { initCostLedger, getCostMtdSnapshot, getCostMonthSummary } from "./cost/ledger.js";
+import { getStandupStatus } from "./standup/status.js";
+import { activateStandup, deactivateStandup } from "./standup/session-state.js";
+import { writeStandupDecisions } from "./standup/decisions.js";
+import { refreshStandupContextIndex } from "./standup/fts-refresh.js";
+import { listStandupPreps } from "./standup/context.js";
+import { standupAgendaFilenameForToday } from "./standup/filenames.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dataDir =
@@ -70,6 +78,7 @@ const publicUrl =
   (lanIp ? `http://${lanIp}:${port}` : `http://127.0.0.1:${port}`);
 
 const db = getDb(dataDir);
+initCostLedger(db);
 const registry = loadRegistry();
 const analystDeps = { db, registry, dataDir };
 
@@ -101,6 +110,7 @@ app.options(/.*/, (_req, res) => {
 });
 
 app.get("/health", (_req, res) => {
+  const cost = getCostMtdSnapshot(db);
   res.json({
     ok: true,
     service: "atlas",
@@ -109,7 +119,89 @@ app.get("/health", (_req, res) => {
     lanIp,
     realtimeProxy: realtimeProxyEnabled(),
     realtimeProxyPath: getRealtimeProxyPath(),
+    schedulers: {
+      morningBrief: getMorningBriefSchedulerStatus(dataDir),
+      managers: getManagerSchedulerStatus(dataDir),
+    },
+    cost,
   });
+});
+
+app.get("/metrics/cost", (_req, res) => {
+  res.json({ summary: getCostMonthSummary(db) });
+});
+
+app.get("/standup/status", (req, res) => {
+  const chatSessionId =
+    typeof req.query.chatSessionId === "string" ? req.query.chatSessionId : undefined;
+  res.json(getStandupStatus(db, registry, chatSessionId));
+});
+
+app.post("/standup/begin", async (req, res) => {
+  try {
+    const chatSessionId =
+      typeof req.body?.chatSessionId === "string" ? req.body.chatSessionId.trim() : undefined;
+    activateStandup(chatSessionId);
+    await refreshStandupContextIndex(db, registry);
+
+    const preps = listStandupPreps(registry);
+    const reporting = preps.filter((p) => p.path && !p.skip);
+    const agendaBody = [
+      `# Standup agenda`,
+      `**Date:** ${new Date().toISOString()}`,
+      "",
+      "## Reporting",
+      ...reporting.map((p) => `- ${p.managerName} (${p.project})`),
+      "",
+      "## Skipped",
+      ...preps.filter((p) => p.skip).map((p) => `- ${p.managerName} (${p.project})`),
+      "",
+      "## Flow",
+      "Per department: manager → chief challenge → follow-up → synthesis → Camron decisions.",
+    ].join("\n");
+
+    writeInboxArtifact(
+      registry,
+      { project: "atlas", title: "Standup agenda", body: agendaBody },
+      db,
+    );
+
+    const status = getStandupStatus(db, registry, chatSessionId);
+    res.json({
+      ok: true,
+      standupActive: true,
+      opening: status.openingHint,
+      agendaFile: standupAgendaFilenameForToday(),
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "standup begin failed",
+    });
+  }
+});
+
+app.post("/standup/end", async (req, res) => {
+  try {
+    const summary = String(req.body?.summary ?? "Standup closed.").trim();
+    const decisions = Array.isArray(req.body?.decisions) ? req.body.decisions : [];
+    const parsed = decisions
+      .filter((d: unknown) => d && typeof d === "object")
+      .map((d: { project?: string; text?: string; approvalDays?: number }) => ({
+        project: String(d.project ?? "atlas"),
+        text: String(d.text ?? "").trim(),
+        approvalDays: Number(d.approvalDays) || 1,
+      }))
+      .filter((d: { text: string }) => d.text);
+
+    const written = writeStandupDecisions(registry, summary, parsed, db);
+    deactivateStandup();
+    await refreshStandupContextIndex(db, registry);
+    res.json({ ok: true, path: written.path });
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "standup end failed",
+    });
+  }
 });
 
 app.get("/realtime/metrics", (_req, res) => {
@@ -150,7 +242,7 @@ app.get("/chief/instructions", (req, res) => {
   }
 
   res.json({
-    instructions: buildChiefInstructions(db, speaker),
+    instructions: buildChiefInstructions(db, speaker, registry),
     model: getRealtimeModel(),
     voice: process.env.XAI_TTS_VOICE ?? "rex",
     speaker: speaker
@@ -382,6 +474,7 @@ app.post("/voice/plan-turn", async (req, res) => {
       deep: Boolean(req.body?.deep),
       research: Boolean(req.body?.research),
       skipTts: Boolean(req.body?.skipTts),
+      standupMode: Boolean(req.body?.standupMode),
     });
     res.json(reply);
   } catch (error) {
@@ -680,4 +773,5 @@ httpServer.listen(port, host, () => {
   }
 
   startMorningBriefScheduler(analystDeps);
+  startManagerScheduler(analystDeps);
 });

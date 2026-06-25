@@ -1,4 +1,5 @@
 import { buildPersonaPrompt, applyPersonaFallback } from "../persona/filter.js";
+import { recordApiUsage } from "../cost/ledger.js";
 
 const XAI_API_URL = process.env.XAI_API_URL ?? "https://api.x.ai/v1";
 
@@ -12,6 +13,8 @@ export interface ChatOptions {
   model?: string;
   temperature?: number;
   maxTokens?: number;
+  /** Cost ledger label (e.g. chief, analyst, voice-chief). */
+  task?: string;
 }
 
 export interface ToolDefinition {
@@ -83,7 +86,25 @@ export async function chatCompletionWithTools(
         tool_calls?: ChatToolCall[];
       };
     }>;
+    usage?: {
+      prompt_tokens?: number;
+      completion_tokens?: number;
+    };
   };
+
+  const model = (body.model as string) ?? "grok-4-fast-non-reasoning";
+  const inputTokens = data.usage?.prompt_tokens ?? 0;
+  const outputTokens = data.usage?.completion_tokens ?? 0;
+  if (inputTokens > 0 || outputTokens > 0) {
+    recordApiUsage({
+      task: options.task ?? "chat",
+      provider: "xai",
+      model,
+      inputTokens,
+      outputTokens,
+      estimatedUsd: 0,
+    });
+  }
 
   const message = data.choices?.[0]?.message;
   return {
@@ -105,7 +126,7 @@ export async function rewriteWithPersona(rawResponse: string): Promise<string> {
           "You rewrite assistant responses into a calm, polite, intelligent chief-assistant voice. Preserve facts exactly.",
       },
       { role: "user", content: buildPersonaPrompt(rawResponse) },
-    ], { temperature: 0.3, maxTokens: 500 });
+    ], { temperature: 0.3, maxTokens: 500, task: "persona" });
 
     return filtered || applyPersonaFallback(rawResponse);
   } catch {
@@ -133,5 +154,14 @@ export async function synthesizeSpeech(text: string): Promise<Buffer> {
   }
 
   const arrayBuffer = await response.arrayBuffer();
+  const inputTokens = Math.max(1, Math.ceil(text.length / 4));
+  recordApiUsage({
+    task: "tts",
+    provider: "xai",
+    model: "xai-tts",
+    inputTokens,
+    outputTokens: 0,
+    estimatedUsd: 0,
+  });
   return Buffer.from(arrayBuffer);
 }

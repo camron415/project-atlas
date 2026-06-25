@@ -160,6 +160,7 @@ async function runWebLookupQuery(query: string): Promise<string> {
       model: AtlasModels.fast(),
       maxOutputTokens: 600,
       tools: [{ type: "web_search" }],
+      task: "web_lookup",
     },
   );
 }
@@ -339,7 +340,7 @@ export async function executeVoiceTool(
       body,
       sessionId,
       analystJobId,
-    });
+    }, ctx.db);
 
     return JSON.stringify({
       ok: true,
