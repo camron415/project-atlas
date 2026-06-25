@@ -15,6 +15,7 @@ type AtlasAudioCaptureNative = {
   startBackgroundHold(): Promise<void>;
   stopBackgroundHold(): Promise<void>;
   releaseAudioSession(): Promise<void>;
+  reapplyVoiceRoute(): Promise<void>;
   isAvailable(): boolean;
   addListener<EventName extends keyof AtlasAudioCaptureEvents>(
     eventName: EventName,
@@ -73,5 +74,12 @@ export async function stopNativeBackgroundHold(): Promise<void> {
 export async function releaseNativeAudioSession(): Promise<void> {
   if (nativeModule?.releaseAudioSession) {
     await nativeModule.releaseAudioSession();
+  }
+}
+
+/** Re-apply AirPods-friendly playAndRecord routing after playback or route changes. */
+export async function reapplyNativeVoiceRoute(): Promise<void> {
+  if (nativeModule?.reapplyVoiceRoute) {
+    await nativeModule.reapplyVoiceRoute();
   }
 }

@@ -128,8 +128,8 @@ export async function prepareForNativeStream(options?: { continuousVoice?: boole
       ExpoSpeechRecognitionModule.setCategoryIOS({
         category: "playAndRecord",
         categoryOptions: options?.continuousVoice
-          ? ["defaultToSpeaker", "allowBluetooth", "allowBluetoothA2DP"]
-          : ["defaultToSpeaker", "allowBluetooth"],
+          ? ["allowBluetooth", "allowBluetoothA2DP"]
+          : ["allowBluetooth"],
         mode: "spokenAudio",
       });
     } catch (e) {

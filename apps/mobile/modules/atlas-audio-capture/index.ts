@@ -5,5 +5,6 @@ export {
   stopNativeAudioCapture,
   stopNativeBackgroundHold,
   releaseNativeAudioSession,
+  reapplyNativeVoiceRoute,
   type PcmChunkEvent,
 } from "./src/AtlasAudioCapture";

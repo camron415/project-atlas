@@ -121,6 +121,8 @@ export async function openXaiSttSession(
       clearTimeout(timeout);
       if (!upstreamReady) {
         reject(new Error("STT WebSocket error"));
+      } else {
+        onEvent({ type: "error", message: "STT WebSocket error" });
       }
     };
 
@@ -129,6 +131,8 @@ export async function openXaiSttSession(
       clearTimeout(timeout);
       if (!upstreamReady) {
         reject(new Error("STT WebSocket closed before ready"));
+      } else {
+        onEvent({ type: "error", message: "STT session closed — reconnecting" });
       }
     };
   });

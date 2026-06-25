@@ -21,10 +21,35 @@ function sortCandidates(urls: string[]): string[] {
   function rank(url: string): number {
     if (url.includes(".ts.net")) return 0;
     if (url.includes("100.")) return 1;
-    if (/10\.\d+\.\d+\.\d+/.test(url)) return 2;
+    if (/\b(?:10|172\.(?:1[6-9]|2\d|3[01])|192\.168)\.\d+\.\d+\b/.test(url)) return 2;
     return 3;
   }
   return [...urls].sort((a, b) => rank(a) - rank(b));
+}
+
+function uniqueUrls(urls: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const url of urls) {
+    if (seen.has(url)) continue;
+    seen.add(url);
+    out.push(url);
+  }
+  return out;
+}
+
+/** Learned at runtime from /health after a successful remote connection. */
+let runtimeCandidates: string[] = [];
+
+/** Register the Mac's current LAN URL (from /health) for faster local fallback. */
+export function registerRuntimeServerUrl(base: string): void {
+  const normalized = base.trim().replace(/\/+$/, "");
+  if (!normalized || runtimeCandidates.includes(normalized)) return;
+  runtimeCandidates = [normalized, ...runtimeCandidates];
+}
+
+function allCandidates(): string[] {
+  return sortCandidates(uniqueUrls([...runtimeCandidates, ...ATLAS_SERVER_URL_CANDIDATES]));
 }
 
 export const ATLAS_SERVER_URL_CANDIDATES = sortCandidates(
@@ -93,7 +118,7 @@ export async function resolveAtlasServerUrl(force = false): Promise<string> {
 
   lastResolveError = null;
   try {
-    const base = await probeSequential(ATLAS_SERVER_URL_CANDIDATES);
+    const base = await probeSequential(allCandidates());
     resolvedServerUrl = base;
     return base;
   } catch (error) {
@@ -107,4 +132,8 @@ export async function resolveAtlasServerUrl(force = false): Promise<string> {
 export function clearResolvedServerUrl(): void {
   resolvedServerUrl = null;
   lastResolveError = null;
+}
+
+export function getServerUrlCandidates(): string[] {
+  return allCandidates();
 }

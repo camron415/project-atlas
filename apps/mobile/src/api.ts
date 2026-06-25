@@ -2,6 +2,7 @@ import {
   resolveAtlasServerUrl,
   clearResolvedServerUrl,
   getLastResolveError,
+  registerRuntimeServerUrl,
 } from "./config";
 
 export interface AtlasHealth {
@@ -110,7 +111,11 @@ export async function checkHealth(force = false): Promise<AtlasHealth> {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const base = await resolveAtlasServerUrl(force || attempt > 0);
-      return await fetchJson<AtlasHealth>(base, "/health");
+      const health = await fetchJson<AtlasHealth>(base, "/health");
+      if (health.lanIp) {
+        registerRuntimeServerUrl(`http://${health.lanIp}:${new URL(base).port || "8787"}`);
+      }
+      return health;
     } catch (error) {
       clearResolvedServerUrl();
       if (attempt === 1) throw error;
@@ -231,6 +236,64 @@ export interface ChiefDeepReply {
 }
 
 /** Deep-reasoning turn: routes server-side to XAI_DEEP_MODEL, returns text. */
+export interface PlanVoiceTurnReply {
+  raw: string;
+  filtered: string;
+  model: string;
+  deep: boolean;
+  audio?: string | null;
+  audioFormat?: string;
+  audioError?: string;
+  analystStatus?: "running" | "done" | "error";
+  analystProject?: string;
+}
+
+export interface InboxListEntry {
+  path: string;
+  filename: string;
+  title: string;
+  writtenAt: string;
+  project: string;
+}
+
+export async function fetchInboxList(
+  project: "atlas" | "vocallearn" | "career" = "atlas",
+): Promise<InboxListEntry[]> {
+  const data = await getJson<{ files: InboxListEntry[] }>(
+    `/inbox/list?project=${encodeURIComponent(project)}`,
+  );
+  return data.files ?? [];
+}
+
+/** Economy voice turn: chief + optional analyst/inbox actions + TTS (no Realtime API). */
+export async function askChiefPlanVoice(
+  message: string,
+  history: ChatTurn[],
+  options: {
+    chatSessionId?: string | null;
+    interrupted?: boolean;
+    deep?: boolean;
+    research?: boolean;
+    skipTts?: boolean;
+    signal?: AbortSignal;
+  } = {},
+): Promise<PlanVoiceTurnReply> {
+  return getJson<PlanVoiceTurnReply>("/voice/plan-turn", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      message,
+      history,
+      chatSessionId: options.chatSessionId ?? undefined,
+      interrupted: options.interrupted ?? false,
+      deep: options.deep ?? false,
+      research: options.research ?? false,
+      skipTts: options.skipTts ?? false,
+    }),
+    signal: options.signal,
+  });
+}
+
 export async function askChiefDeep(
   message: string,
   history: ChatTurn[],

@@ -5,6 +5,8 @@ export const AtlasModels = {
   fast: () => process.env.XAI_CHAT_MODEL ?? "grok-4-fast-non-reasoning",
   /** Deep reasoning when user explicitly asks. */
   deep: () => process.env.XAI_DEEP_MODEL ?? "grok-4-fast-reasoning",
+  /** Live lookup (weather, news) — fast model + web_search via responses API. */
+  research: () => process.env.XAI_CHAT_MODEL ?? "grok-4-fast-non-reasoning",
   /** Project code inventory synthesis during deep refresh. */
   scan: () => process.env.XAI_SCAN_MODEL ?? process.env.XAI_CHAT_MODEL ?? "grok-4-fast-non-reasoning",
   /** Realtime voice (WebSocket). */

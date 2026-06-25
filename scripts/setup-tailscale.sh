@@ -56,7 +56,8 @@ if [[ ! "${TS_IP}" =~ ^100\. ]]; then
 fi
 
 ATLAS_URL="http://${TS_IP}:${ATLAS_PORT}"
-LAN_URL="http://10.0.0.84:${ATLAS_PORT}"
+LAN_IP="$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo "10.0.0.84")"
+LAN_URL="http://${LAN_IP}:${ATLAS_PORT}"
 TS_HOST=""
 TAILNET=""
 if command -v tailscale >/dev/null 2>&1; then

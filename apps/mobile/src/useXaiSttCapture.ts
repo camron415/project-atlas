@@ -4,18 +4,19 @@
  * Invariants:
  *  - Native capture applies playAndRecord + spokenAudio (never rely on JS alone).
  *  - Submit closes STT only; mic keeps running until pauseForPlayback (playback prep).
- *  - speech_final is the only auto-submit path (+ debounce, min listen window).
+ *  - Auto-submit on speech_final (+ debounce); idle fallback only if no final.
  *  - All transitions serialized via runExclusive.
  */
 import { useCallback, useEffect, useRef } from "react";
 import {
   isNativeAudioCaptureAvailable,
+  reapplyNativeVoiceRoute,
   startNativeAudioCapture,
   startNativeBackgroundHold,
   stopNativeAudioCapture,
   stopNativeBackgroundHold,
 } from "atlas-audio-capture";
-import { fetchSttConfig } from "./api";
+import { clearSttConfigCache, fetchSttConfig, type SttConfig } from "./api";
 import { activateVoiceSessionAudio } from "./background-audio";
 import { dlog, dwarn } from "./log";
 import { applyVoiceAudioMode } from "./speech";
@@ -27,13 +28,22 @@ import {
   type SttTranscriptEvent,
   type XaiSttSession,
 } from "./xai-stt";
-import { applySttPartialEvent, newSttTranscriptState } from "./stt-transcript";
-import { computeSilenceSubmitMs, countWords, LISTEN_WATCHDOG_MS } from "./voice-endpoint";
+import {
+  applySttPartialEvent,
+  newSttTranscriptState,
+  normalizeSttUtterance,
+} from "./stt-transcript";
+import {
+  computeIdleFallbackMs,
+  computeSpeechFinalSubmitMs,
+  countWords,
+  LISTEN_WATCHDOG_MS,
+} from "./voice-endpoint";
 import type { VoiceCaptureOptions } from "./useVoiceCapture";
 
 const noop = () => {};
 /** Ignore instant submit right after mic open — blocks false submits on noise. */
-const MIN_LISTEN_MS = 800;
+const MIN_LISTEN_MS = 350;
 
 type SubmitReason = "silence" | "watchdog" | "manual";
 
@@ -52,12 +62,18 @@ export function useXaiSttCapture(options: VoiceCaptureOptions) {
 
   const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const idleFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const sttSessionRef = useRef<XaiSttSession | null>(null);
+  const sttSessionGenRef = useRef(0);
   const captureStopFnRef = useRef<(() => Promise<void>) | null>(null);
   const holdActiveRef = useRef(false);
+  const reconnectingRef = useRef(false);
+  const reconnectAttemptsRef = useRef(0);
+  const MAX_STT_RECONNECT = 3;
 
   const listenHandlerRef = useRef<(e: SttTranscriptEvent) => void>(noop);
+  const prefetchedConfigRef = useRef<SttConfig | null>(null);
 
   const lockRef = useRef<Promise<unknown>>(Promise.resolve());
   const runExclusive = useCallback(<T,>(fn: () => Promise<T>): Promise<T> => {
@@ -71,6 +87,10 @@ export function useXaiSttCapture(options: VoiceCaptureOptions) {
   const clearTimers = () => {
     if (watchdogRef.current) { clearTimeout(watchdogRef.current); watchdogRef.current = null; }
     if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
+    if (idleFallbackTimerRef.current) {
+      clearTimeout(idleFallbackTimerRef.current);
+      idleFallbackTimerRef.current = null;
+    }
   };
 
   const setTranscript = (text: string) => {
@@ -158,30 +178,47 @@ export function useXaiSttCapture(options: VoiceCaptureOptions) {
   const openListenUnit = useCallback(async (quick: boolean) => {
     teardownStt();
 
+    const skipConnecting =
+      quick && (Boolean(captureStopFnRef.current) || holdActiveRef.current);
+
     await activateVoiceSessionAudio();
     if (!quick) {
       await stopStreamingPlayback();
       await stopPlayback();
     }
     await applyVoiceAudioMode({ continuousVoice: true });
+    await reapplyNativeVoiceRoute().catch(() => {});
 
-    const config = await fetchSttConfig();
+    const config = prefetchedConfigRef.current ?? (await fetchSttConfig());
+    prefetchedConfigRef.current = null;
     if (!config.enabled) throw new Error("xAI STT is disabled on the Atlas server");
-
-    await ensureMicCapture();
 
     const wasActive = activeRef.current;
     activeRef.current = true;
-    emitListenPhase("connecting");
+    if (!skipConnecting) {
+      emitListenPhase("connecting");
+    }
 
-    const session = await openXaiSttSession((e) => listenHandlerRef.current(e), config);
+    const gen = ++sttSessionGenRef.current;
+    const [_, session] = await Promise.all([
+      ensureMicCapture(),
+      openXaiSttSession((e) => {
+        if (gen !== sttSessionGenRef.current) return;
+        listenHandlerRef.current(e);
+      }, config),
+    ]);
     sttSessionRef.current = session;
     try {
       await session.ready;
+      reconnectAttemptsRef.current = 0;
     } catch (error) {
       activeRef.current = wasActive;
       sttSessionRef.current = null;
       throw error;
+    }
+
+    if (skipConnecting) {
+      emitListenPhase("hearing");
     }
 
     listenStartedAtRef.current = Date.now();
@@ -191,6 +228,7 @@ export function useXaiSttCapture(options: VoiceCaptureOptions) {
   const submitRef = useRef<(text?: string, reason?: SubmitReason) => Promise<void>>(async () => {});
 
   const armWatchdog = useCallback(() => {
+    if (optionsRef.current.isMonologue?.()) return;
     if (watchdogRef.current) clearTimeout(watchdogRef.current);
     watchdogRef.current = setTimeout(() => {
       watchdogRef.current = null;
@@ -202,7 +240,7 @@ export function useXaiSttCapture(options: VoiceCaptureOptions) {
   /** End listening: close STT, hand text to Atlas. Mic stays up until pauseForPlayback. */
   const forceSubmit = useCallback(async (explicitText?: string, reason: SubmitReason = "manual") => {
     if (submittedRef.current) return;
-    const text = (explicitText ?? transcriptRef.current).trim();
+    const text = normalizeSttUtterance(explicitText ?? transcriptRef.current);
     if (!text) return;
 
     submittedRef.current = true;
@@ -228,19 +266,69 @@ export function useXaiSttCapture(options: VoiceCaptureOptions) {
   }, []);
   submitRef.current = forceSubmit;
 
-  const scheduleSilenceSubmit = useCallback((text: string) => {
+  const scheduleSpeechFinalSubmit = useCallback((text: string) => {
     const trimmed = text.trim();
     if (!trimmed) return;
     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-    const delayMs = computeSilenceSubmitMs(trimmed);
-    dlog("stt", `silence timer ${delayMs}ms (${countWords(trimmed)} words)`);
-    silenceTimerRef.current = setTimeout(() => {
-      silenceTimerRef.current = null;
+    if (idleFallbackTimerRef.current) {
+      clearTimeout(idleFallbackTimerRef.current);
+      idleFallbackTimerRef.current = null;
+    }
+    const delayMs = computeSpeechFinalSubmitMs(trimmed);
+    dlog("stt", `speech_final → submit in ${delayMs}ms (${countWords(trimmed)} words)`);
+    const submit = () => {
       if (!activeRef.current || submittedRef.current) return;
       if (Date.now() - listenStartedAtRef.current < MIN_LISTEN_MS) return;
       void forceSubmit(undefined, "silence");
+    };
+    if (delayMs <= 0) {
+      submit();
+      return;
+    }
+    silenceTimerRef.current = setTimeout(() => {
+      silenceTimerRef.current = null;
+      submit();
     }, delayMs);
   }, [forceSubmit]);
+
+  const armIdleFallback = useCallback((text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    if (idleFallbackTimerRef.current) clearTimeout(idleFallbackTimerRef.current);
+    const monologue = optionsRef.current.isMonologue?.() ?? false;
+    if (monologue) return;
+    const delayMs = computeIdleFallbackMs(trimmed, false);
+    idleFallbackTimerRef.current = setTimeout(() => {
+      idleFallbackTimerRef.current = null;
+      if (!activeRef.current || submittedRef.current) return;
+      if (Date.now() - listenStartedAtRef.current < MIN_LISTEN_MS) return;
+      dlog("stt", `idle fallback auto-submit (${delayMs}ms)`);
+      void forceSubmit(undefined, "silence");
+    }, delayMs);
+  }, [forceSubmit]);
+
+  const reconnectStt = useCallback(async () => {
+    if (reconnectingRef.current || submittedRef.current || !activeRef.current) return;
+    if (reconnectAttemptsRef.current >= MAX_STT_RECONNECT) {
+      optionsRef.current.onError?.("STT connection lost — tap mic to reconnect");
+      return;
+    }
+    reconnectingRef.current = true;
+    reconnectAttemptsRef.current += 1;
+    try {
+      dlog("stt", `reconnecting STT (attempt ${reconnectAttemptsRef.current})`);
+      clearTranscript();
+      await openListenUnit(true);
+      armWatchdog();
+    } catch (error) {
+      dwarn("stt", "reconnect failed", error);
+      optionsRef.current.onError?.(
+        error instanceof Error ? error.message : "STT reconnect failed — tap mic to try again",
+      );
+    } finally {
+      reconnectingRef.current = false;
+    }
+  }, [armWatchdog, openListenUnit]);
 
   const handleListenEvent = useCallback(
     (event: SttTranscriptEvent) => {
@@ -248,6 +336,7 @@ export function useXaiSttCapture(options: VoiceCaptureOptions) {
 
       if (event.type === "error") {
         dwarn("stt", `event error: ${event.message ?? "unknown"}`);
+        void reconnectStt();
         return;
       }
 
@@ -259,17 +348,31 @@ export function useXaiSttCapture(options: VoiceCaptureOptions) {
         speech_final: event.speech_final,
       });
       setTranscript(display);
-      emitListenPhase("transcribing");
 
       const speakerId = dominantSttSpeaker(event.words);
       if (speakerId !== null) sttSpeakerIdRef.current = speakerId;
 
-      if (display !== lastScheduledTextRef.current || !silenceTimerRef.current) {
+      if (event.speech_final) {
+        if (optionsRef.current.isMonologue?.()) {
+          emitListenPhase("hearing");
+          return;
+        }
+        emitListenPhase("transcribing");
         lastScheduledTextRef.current = display;
-        scheduleSilenceSubmit(display);
+        scheduleSpeechFinalSubmit(display);
+        return;
       }
+
+      // User still speaking — cancel a pending post-final submit.
+      if (silenceTimerRef.current) {
+        clearTimeout(silenceTimerRef.current);
+        silenceTimerRef.current = null;
+        lastScheduledTextRef.current = "";
+      }
+
+      armIdleFallback(display);
     },
-    [emitListenPhase, scheduleSilenceSubmit],
+    [armIdleFallback, emitListenPhase, reconnectStt, scheduleSpeechFinalSubmit],
   );
   listenHandlerRef.current = handleListenEvent;
 
@@ -281,6 +384,7 @@ export function useXaiSttCapture(options: VoiceCaptureOptions) {
       submittedRef.current = false;
       sttSpeakerIdRef.current = null;
       clearTranscript();
+      clearSttConfigCache();
       await teardownAll();
       await openListenUnit(false);
       armWatchdog();
@@ -354,7 +458,11 @@ export function useXaiSttCapture(options: VoiceCaptureOptions) {
     isCaptureRunning: () => Boolean(captureStopFnRef.current) || holdActiveRef.current,
     startInterruptMonitor: async (_cb: (t: string) => void) => {},
     stopInterruptMonitor: () => {},
-    prefetchListenSession: () => {},
+    prefetchListenSession: () => {
+      void fetchSttConfig().then((config) => {
+        prefetchedConfigRef.current = config;
+      });
+    },
     onSpeechResult: noop,
     onSpeechEnd: noop,
     onSpeechError: noop,

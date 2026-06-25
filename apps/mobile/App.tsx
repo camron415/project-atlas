@@ -14,16 +14,20 @@ import {
   View,
 } from "react-native";
 import * as Haptics from "expo-haptics";
-import { speakMomentSir, stopMomentSpeech } from "./src/moment";
+import { speakMomentAnalyst, speakMomentSir, stopMomentSpeech } from "./src/moment";
 import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import {
   askChiefDeep,
+  askChiefPlanVoice,
   checkHealth,
   fetchChiefSession,
+  fetchInboxList,
   fetchRealtimeClientSecret,
+  fetchSttConfig,
   fetchTtsAudio,
+  type InboxListEntry,
   refreshReports,
   resolveSpeakerProfile,
   type ChatTurn,
@@ -49,11 +53,14 @@ import {
 } from "./src/speech";
 import { recordTranscript } from "./src/transcript";
 import { speakAtlasReply } from "./src/speak-reply";
+import { cancelEconomySpeak, speakEconomyReply } from "./src/speak-economy-reply";
+import { cleanSttText } from "./src/stt-cleanup";
 import {
   useAdaptiveVoiceCapture,
   voiceCaptureModeLabel,
   CAN_USE_XAI_STT,
   USE_UNIFIED_REALTIME,
+  USE_VOICE_ECONOMY,
 } from "./src/useAdaptiveVoiceCapture";
 import type { UnifiedVoiceTurnDeps } from "./src/useUnifiedRealtimeVoice";
 import {
@@ -88,9 +95,12 @@ import {
 const DEEP_INTENT = /\b(think (deeply|hard|carefully)|deep dive|deep[- ]?think|take your time|really think|think it through)\b/i;
 // Phrases that should force a fresh project rescan before answering.
 const REFRESH_INTENT = /\b(latest|refresh|re-?scan|up to date|most recent|current status|what's new|whats new|review (the )?code|scan (my )?projects|what context|what do you know|deep scan|read (my )?repos)\b/i;
-// Phrases that trigger web search, lookups, or other slow research.
-const RESEARCH_INTENT =
-  /\b(search (the )?(web|internet)|look (it )?up|google|weather|forecast|news|headlines|current events|what(?:'s| is) (the |happening|going on)|find (out|me)|on the web|online|browse|tell me about (the )?(latest|news|weather))\b/i;
+const ANALYST_CONFIRM_RE =
+  /^(yes|yeah|yep|sure|ok|okay|go ahead|proceed|please do|do it|affirmative|confirm)\b/i;
+const PLANNING_INTENT =
+  /\b(why|should we|how should|what if|plan|decide|strategy|priorit|roadmap|next step|trade-?off|compare|recommend|brainstorm|work out|figure out)\b/i;
+const ANALYST_DISPATCH_RE =
+  /\b(run|pull|call|dispatch|start).*analyst\b|review (the )?(atlas|vocallearn|career)\b/i;
 
 function looksDeep(text: string): boolean {
   return DEEP_INTENT.test(text);
@@ -100,8 +110,24 @@ function looksRefresh(text: string): boolean {
   return REFRESH_INTENT.test(text);
 }
 
-function looksResearch(text: string): boolean {
-  return RESEARCH_INTENT.test(text);
+function looksPlanning(text: string): boolean {
+  const words = text.trim().split(/\s+/).filter(Boolean).length;
+  return PLANNING_INTENT.test(text) || words >= 28;
+}
+
+/** Research routing is chief tool policy (web_lookup), not client regex. */
+function looksResearch(_text: string): boolean {
+  return false;
+}
+
+function looksAnalystDispatch(text: string): boolean {
+  return ANALYST_DISPATCH_RE.test(text);
+}
+
+function looksAnalystConfirmYes(text: string, history: ChatTurn[]): boolean {
+  if (!ANALYST_CONFIRM_RE.test(text.trim())) return false;
+  const lastAtlas = [...history].reverse().find((m) => m.role === "assistant");
+  return Boolean(lastAtlas?.content.toLowerCase().includes("analyst review"));
 }
 
 type Role = "user" | "atlas";
@@ -117,7 +143,7 @@ type Status = "idle" | "listening" | "thinking" | "speaking";
 type Connection = "unknown" | "online" | "offline";
 
 /** Bumped each release — confirm in app header after install. */
-const APP_BUILD_STAMP = "2026-06-10-phase-175";
+const APP_BUILD_STAMP = "2026-06-12-return-economy";
 
 function formatListenError(error: unknown): string {
   const msg = error instanceof Error ? error.message : String(error);
@@ -187,6 +213,8 @@ function AtlasApp() {
     project?: string;
     error?: string;
   } | null>(null);
+  const [inboxFiles, setInboxFiles] = useState<InboxListEntry[]>([]);
+  const [monologueListening, setMonologueListening] = useState(false);
 
   const listRef = useRef<FlatList<Message>>(null);
   const chatSessionIdRef = useRef<string | null>(null);
@@ -202,6 +230,7 @@ function AtlasApp() {
   const deepModeRef = useRef(false);
   /** True while user wants continuous voice mode (tap once, keep talking). */
   const micSessionRef = useRef(false);
+  const monologueModeRef = useRef(false);
   const appStateRef = useRef(AppState.currentState);
   const pendingShortcutListenRef = useRef(false);
   const beginListenInFlightRef = useRef(false);
@@ -341,7 +370,7 @@ function AtlasApp() {
         (error instanceof Error ? error.message : "Atlas server unreachable");
       const hint =
         /network request failed|unreachable|abort/i.test(detail)
-          ? " — is the Mac server running? (cd server && npm run dev)"
+          ? " — is the Mac server running? Enable Tailscale on iPhone, or rebuild after WiFi change."
           : "";
       setConnectionError(`${detail}${hint}`);
     }
@@ -388,6 +417,12 @@ function AtlasApp() {
   const cancelActiveRequest = useCallback(() => {
     activeRequestRef.current?.abort();
     activeRequestRef.current = null;
+  }, []);
+
+  const prewarmMicForResume = useCallback(() => {
+    if (!micSessionRef.current) return;
+    void fetchSttConfig();
+    voiceCaptureRef.current?.prefetchListenSession();
   }, []);
 
   // Fast path: Grok-style AVAudioEngine PCM stream; TTS only if PCM never reached the engine.
@@ -459,6 +494,69 @@ function AtlasApp() {
     [pushMessage, scrollToEnd],
   );
 
+  // Economy path: Grok STT transcript → /voice/plan-turn (chief + analyst + inbox + TTS).
+  const runEconomyTurn = useCallback(
+    async (
+      clean: string,
+      history: ChatTurn[],
+      interrupted: boolean,
+      controller: AbortController,
+      afterHoldPhrase: boolean,
+      chatSessionId: string | null,
+    ) => {
+      const researchHint = afterHoldPhrase
+        ? "[Camron already heard a brief hold phrase. Do NOT open with Yes sir or any acknowledgment. Say sir at most once. Answer directly.] "
+        : "";
+      const deep = deepModeRef.current || looksDeep(clean);
+      if (ANALYST_CONFIRM_RE.test(clean.trim())) {
+        setAnalystStatus({ status: "running", project: "project" });
+      }
+      const reply = await askChiefPlanVoice(researchHint + clean, history, {
+        chatSessionId,
+        interrupted,
+        deep,
+        skipTts: true,
+        signal: controller.signal,
+      });
+      if (controller.signal.aborted) return;
+
+      if (reply.analystStatus) {
+        setAnalystStatus({
+          status: reply.analystStatus,
+          project: reply.analystProject,
+        });
+        if (reply.analystStatus === "done" || reply.analystStatus === "error") {
+          setTimeout(() => setAnalystStatus(null), 8000);
+        }
+      } else if (ANALYST_CONFIRM_RE.test(clean.trim())) {
+        setAnalystStatus(null);
+      }
+
+      setConnection("online");
+
+      if (controller.signal.aborted) return;
+
+      setStreamingAtlas(reply.filtered);
+      setStatus("speaking");
+      scrollToEnd();
+
+      const speak = await speakEconomyReply(reply.filtered, {
+        voiceSession: micSessionRef.current,
+        signal: controller.signal,
+        onStart: prewarmMicForResume,
+      });
+
+      if (!speak.spoken && !controller.signal.aborted) {
+        dwarn("economy", `speak produced no audio (${speak.error ?? "unknown"})`);
+      }
+
+      setStreamingAtlas("");
+      pushMessage({ id: makeId(), role: "atlas", text: reply.filtered });
+      scrollToEnd();
+    },
+    [prewarmMicForResume, pushMessage, scrollToEnd],
+  );
+
   // Deep path: server reasoning model, then spoken via TTS. Used on explicit
   // permission ("think deeply") or the Deep toggle. Slower but more capable.
   const runDeepTurn = useCallback(
@@ -494,7 +592,7 @@ function AtlasApp() {
 
   const sendToAtlas = useCallback(
     async (text: string, interrupted: boolean, meta?: VoiceSubmitMeta) => {
-      const clean = text.trim();
+      const clean = cleanSttText(text.trim());
       if (!clean) {
         setStatus("idle");
         return;
@@ -503,7 +601,14 @@ function AtlasApp() {
       const deep = deepModeRef.current || looksDeep(clean);
       const needsRefresh = looksRefresh(clean);
       const needsResearch = looksResearch(clean);
-      const needsMoment = deep || needsRefresh || needsResearch;
+      const needsPlanning = looksPlanning(clean);
+      const priorHistory: ChatTurn[] = messagesRef.current
+        .filter((msg) => !msg.error)
+        .map(toChatTurn);
+      const needsAnalyst =
+        looksAnalystDispatch(clean) || looksAnalystConfirmYes(clean, priorHistory);
+      const needsMoment =
+        deep || needsRefresh || needsResearch || needsPlanning || needsAnalyst;
       dlog(
         "turn",
         `send deep=${deep} refresh=${needsRefresh} research=${needsResearch} text="${clean.slice(0, 60)}"`,
@@ -556,24 +661,35 @@ function AtlasApp() {
         }
       }
 
-      if (needsResearch) {
+      if (meta?.fieldMonologue) {
+        messageForAtlas =
+          `[Field report monologue — full utterance in transcript. Brief acknowledgment unless asked to analyze.] ${clean}`;
+      }
+
+      if (USE_VOICE_ECONOMY || needsResearch) {
         const loc = await getLocationContext();
         if (loc) {
-          messageForAtlas = `[User location: ${loc}. Use this for weather, local news, and nearby queries.] ${clean}`;
+          messageForAtlas = `[User location: ${loc}. Use for local context and web_lookup queries.] ${messageForAtlas}`;
         }
       }
 
       try {
-        const secretPromise = fetchRealtimeClientSecret();
-        if (micSessionRef.current) {
-          await voiceCaptureRef.current?.pauseForPlayback();
-        }
+        cancelEconomySpeak();
+        const secretPromise = USE_VOICE_ECONOMY ? null : fetchRealtimeClientSecret();
 
         if (needsMoment) {
-          await speakMomentSir();
+          if (needsAnalyst) {
+            await speakMomentAnalyst();
+          } else {
+            await speakMomentSir();
+          }
           if (controller.signal.aborted) return;
           await stopStreamingPlayback();
           await resetAudioForPlayback();
+        }
+
+        if (micSessionRef.current) {
+          await voiceCaptureRef.current?.pauseForPlayback();
         }
 
         if (needsRefresh) {
@@ -590,10 +706,19 @@ function AtlasApp() {
           await loadChiefSession();
         }
 
-        if (deep) {
+        if (USE_VOICE_ECONOMY) {
+          await runEconomyTurn(
+            messageForAtlas,
+            history,
+            interrupted,
+            controller,
+            needsMoment,
+            chatSessionIdRef.current,
+            secretPromise,
+          );
+        } else if (deep) {
           await runDeepTurn(messageForAtlas, history, interrupted, controller, needsMoment);
         } else {
-          const secret = await secretPromise;
           await runFastTurn(
             messageForAtlas,
             history,
@@ -601,7 +726,7 @@ function AtlasApp() {
             controller,
             needsMoment,
             voiceInputPrefix,
-            secret,
+            await secretPromise,
           );
         }
       } catch (error) {
@@ -652,7 +777,7 @@ function AtlasApp() {
         }
       }
     },
-    [loadChiefSession, pushMessage, runDeepTurn, runFastTurn, scrollToEnd],
+    [loadChiefSession, pushMessage, runDeepTurn, runEconomyTurn, runFastTurn, scrollToEnd],
   );
 
   const unifiedDepsRef = useRef<UnifiedVoiceTurnDeps>({
@@ -720,23 +845,32 @@ function AtlasApp() {
       },
       onListenPhase: (phase) => setListenPhase(phase),
       onError: (message) => setNotice(message),
+      isMonologue: () => monologueModeRef.current,
       onCaptureEnd: () => {
         if (micSessionRef.current) return;
         if (statusRef.current === "listening") {
           setStatus("idle");
         }
+        setMonologueListening(false);
+        monologueModeRef.current = false;
       },
       onSubmit: async (text, meta) => {
         if (USE_UNIFIED_REALTIME) return;
         const interrupted = interruptedRef.current;
+        const wasMonologue = monologueModeRef.current;
         interruptedRef.current = false;
+        monologueModeRef.current = false;
+        setMonologueListening(false);
         setPartial("");
         setListenPhase("connecting");
         setStatus("thinking");
         if (micSessionRef.current) {
           await activateVoiceSessionAudio();
         }
-        await sendToAtlas(text, interrupted, meta);
+        await sendToAtlas(text, interrupted, {
+          ...meta,
+          fieldMonologue: wasMonologue,
+        });
       },
     },
     unifiedDepsRef,
@@ -851,7 +985,7 @@ function AtlasApp() {
     if (handleSpeechError(event)) return;
     // Suppress Apple STT errors during a Grok STT session
     if (
-      (CAN_USE_XAI_STT || USE_UNIFIED_REALTIME) &&
+      (CAN_USE_XAI_STT || USE_UNIFIED_REALTIME || USE_VOICE_ECONOMY) &&
       (micSessionRef.current || voiceCaptureRef.current?.isListenActive())
     ) {
       return;
@@ -982,6 +1116,11 @@ function AtlasApp() {
   }, [settingsLoaded, connection, status, messages, wakeWordEnabled, partial]);
 
   const handleMicToggle = useCallback(async () => {
+    if (monologueListening) {
+      setNotice("Tap Monologue to finish your field report.");
+      return;
+    }
+
     const pendingText =
       partialRef.current.trim() || voiceCapture.getTranscript().trim();
 
@@ -1050,8 +1189,86 @@ function AtlasApp() {
     }
 
     interruptedRef.current = false;
+    monologueModeRef.current = false;
+    setMonologueListening(false);
     await beginVoiceListen();
   }, [beginVoiceListen]);
+
+  const beginMonologueListen = useCallback(async () => {
+    if (beginListenInFlightRef.current) return;
+    let online = await waitForServerOnline(4_000);
+    if (!online) {
+      await connectToServer();
+      online = await waitForServerOnline(8_000);
+    }
+    if (!online) {
+      setNotice("Start the Mac server (cd server && npm run dev), then try again.");
+      return;
+    }
+
+    await pauseWakeListeningForVoice();
+    await new Promise((resolve) => setTimeout(resolve, 120));
+
+    beginListenInFlightRef.current = true;
+    interruptedRef.current = false;
+    micSessionRef.current = true;
+    monologueModeRef.current = true;
+    setMonologueListening(true);
+    setNotice(null);
+    setListenPhase("connecting");
+    setStatus("listening");
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+
+    try {
+      await abortRealtime();
+      await activateVoiceSessionAudio();
+      await voiceCapture.startCapture();
+      await prewarmStreamingPlayback();
+    } catch (error) {
+      dwarn("voice", "monologue listen failed", error);
+      setStatus("idle");
+      micSessionRef.current = false;
+      monologueModeRef.current = false;
+      setMonologueListening(false);
+      setNotice(formatListenError(error));
+    } finally {
+      beginListenInFlightRef.current = false;
+    }
+  }, [connectToServer, voiceCapture, waitForServerOnline]);
+
+  const handleMonologueToggle = useCallback(async () => {
+    const pendingText =
+      partialRef.current.trim() || voiceCapture.getTranscript().trim();
+
+    if (monologueListening && pendingText) {
+      setNotice(null);
+      await voiceCapture.forceSubmit(pendingText);
+      return;
+    }
+
+    if (monologueListening && voiceCapture.isActive() && !pendingText) {
+      micSessionRef.current = false;
+      monologueModeRef.current = false;
+      setMonologueListening(false);
+      setNotice(null);
+      await voiceCapture.stopCapture(false);
+      await shutdownStreamingPlayback();
+      setStatus("idle");
+      return;
+    }
+
+    if (voiceCapture.isActive() && !monologueListening) {
+      setNotice("Stop the mic session before starting monologue.");
+      return;
+    }
+
+    if (statusRef.current === "thinking" || statusRef.current === "speaking") {
+      setNotice("Wait for Atlas to finish, or tap mic to interrupt.");
+      return;
+    }
+
+    await beginMonologueListen();
+  }, [beginMonologueListen, monologueListening, voiceCapture]);
 
   const handleSendDraft = useCallback(async () => {
     const text = draft.trim();
@@ -1183,6 +1400,9 @@ function AtlasApp() {
               style={styles.historyBtn}
               onPress={() => {
                 void refreshChatSessionList();
+                void fetchInboxList("atlas")
+                  .then(setInboxFiles)
+                  .catch(() => setInboxFiles([]));
                 setHistoryOpen(true);
               }}
               accessibilityLabel="Chat history"
@@ -1263,6 +1483,20 @@ function AtlasApp() {
                 {deepMode ? "● Deep reasoning" : "○ Deep reasoning"}
               </Text>
             </Pressable>
+            <Pressable
+              onPress={() => void handleMonologueToggle()}
+              style={[styles.monologueToggle, monologueListening && styles.monologueToggleOn]}
+              disabled={isListening && !monologueListening}
+            >
+              <Text
+                style={[
+                  styles.monologueToggleText,
+                  monologueListening && styles.monologueToggleTextOn,
+                ]}
+              >
+                {monologueListening ? "● Monologue" : "○ Monologue"}
+              </Text>
+            </Pressable>
           </View>
           <View style={styles.inputRow}>
             <TextInput
@@ -1305,13 +1539,18 @@ function AtlasApp() {
             </Text>
           ) : null}
           <Text style={styles.hint}>
-            {isListening && partial.trim()
-              ? voiceCaptureModeLabel() === "Grok STT"
-                ? "Keep talking — Smart Turn sends when you're done, or tap mic"
-                : "Keep talking — ~3s pause sends, or tap mic"
-              : isListening
-                ? "Listening… tap mic when you're done"
-                : STATUS_LABEL[status]}
+            {monologueListening && partial.trim()
+              ? "Monologue — tap Monologue when finished (no auto-send)"
+              : monologueListening
+                ? "Monologue recording… tap Monologue to finish"
+                : isListening && partial.trim()
+                  ? voiceCaptureModeLabel() === "Grok STT" ||
+                    voiceCaptureModeLabel() === "Voice economy"
+                    ? "Keep talking — Smart Turn sends when you're done, or tap mic"
+                    : "Keep talking — ~3s pause sends, or tap mic"
+                  : isListening
+                    ? "Listening… tap mic when you're done"
+                    : STATUS_LABEL[status]}
           </Text>
         </View>
       </KeyboardAvoidingView>
@@ -1319,6 +1558,7 @@ function AtlasApp() {
       <ChatHistoryDrawer
         visible={historyOpen}
         sessions={chatSessions}
+        inboxFiles={inboxFiles}
         activeSessionId={chatSessionId}
         onClose={() => setHistoryOpen(false)}
         onSelect={(id) => {
@@ -1477,7 +1717,14 @@ const styles = StyleSheet.create({
     backgroundColor: "#0d121b",
     alignItems: "center",
   },
-  toggleRow: { flexDirection: "row", justifyContent: "flex-end", width: "100%", marginBottom: 8 },
+  toggleRow: {
+    flexDirection: "row",
+    justifyContent: "flex-start",
+    flexWrap: "wrap",
+    gap: 8,
+    width: "100%",
+    marginBottom: 8,
+  },
   deepToggle: {
     paddingHorizontal: 12,
     paddingVertical: 6,
@@ -1489,6 +1736,17 @@ const styles = StyleSheet.create({
   deepToggleOn: { backgroundColor: "#3b2f12", borderColor: "#f59e0b" },
   deepToggleText: { color: "#8b95a5", fontSize: 12, fontWeight: "600" },
   deepToggleTextOn: { color: "#f5b342" },
+  monologueToggle: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: "#141a24",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "#2a3340",
+  },
+  monologueToggleOn: { backgroundColor: "#1a2e3d", borderColor: "#38bdf8" },
+  monologueToggleText: { color: "#8b95a5", fontSize: 12, fontWeight: "600" },
+  monologueToggleTextOn: { color: "#7dd3fc" },
   inputRow: { flexDirection: "row", alignItems: "center", width: "100%", gap: 8 },
   input: {
     flex: 1,

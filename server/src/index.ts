@@ -51,10 +51,12 @@ import {
   listChatMessages,
   listChatSessions,
 } from "./sessions/store.js";
-import { writeInboxArtifact } from "./inbox/store.js";
+import { listInboxArtifacts, writeInboxArtifact } from "./inbox/store.js";
 import type { InboxProjectSlug } from "./inbox/types.js";
 import { enqueueAnalystJob } from "./analyst/run.js";
 import { getAnalystJob } from "./analyst/store.js";
+import { startMorningBriefScheduler } from "./morning-brief/schedule.js";
+import { resolveLanIp } from "./network/lan-ip.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dataDir =
@@ -62,14 +64,23 @@ const dataDir =
   path.resolve(__dirname, "../data");
 const port = Number(process.env.ATLAS_PORT ?? 8787);
 const host = process.env.ATLAS_HOST ?? "0.0.0.0";
+const lanIp = resolveLanIp();
 const publicUrl =
   process.env.ATLAS_PUBLIC_URL ??
-  (process.env.ATLAS_LAN_IP
-    ? `http://${process.env.ATLAS_LAN_IP}:${port}`
-    : `http://127.0.0.1:${port}`);
+  (lanIp ? `http://${lanIp}:${port}` : `http://127.0.0.1:${port}`);
 
 const db = getDb(dataDir);
 const registry = loadRegistry();
+const analystDeps = { db, registry, dataDir };
+
+void import("./context/search.js").then(({ rebuildContextIndex }) => {
+  try {
+    const n = rebuildContextIndex(db, registry);
+    slog(`FTS context index: ${n} documents`);
+  } catch (error) {
+    console.warn("[atlas] FTS index build failed:", error);
+  }
+});
 const transcriptPath = path.join(dataDir, "transcripts.jsonl");
 
 const debug = process.env.ATLAS_DEBUG === "1";
@@ -95,7 +106,7 @@ app.get("/health", (_req, res) => {
     service: "atlas",
     version: "0.1.0",
     url: publicUrl,
-    lanIp: process.env.ATLAS_LAN_IP ?? null,
+    lanIp,
     realtimeProxy: realtimeProxyEnabled(),
     realtimeProxyPath: getRealtimeProxyPath(),
   });
@@ -341,12 +352,41 @@ app.post("/chat", async (req, res) => {
       history: Array.isArray(req.body?.history) ? req.body.history : [],
       interrupted: Boolean(req.body?.interrupted),
       deep: Boolean(req.body?.deep),
+      research: Boolean(req.body?.research),
     });
-    slog(`/chat deep=${reply.deep} model=${reply.model} chars=${reply.filtered.length}`);
+    slog(
+      `/chat deep=${reply.deep} research=${reply.research} model=${reply.model} chars=${reply.filtered.length}`,
+    );
     res.json(reply);
   } catch (error) {
     res.status(500).json({
       error: error instanceof Error ? error.message : "chat failed",
+    });
+  }
+});
+
+app.post("/voice/plan-turn", async (req, res) => {
+  try {
+    const message = String(req.body?.message ?? "").trim();
+    if (!message) {
+      res.status(400).json({ error: "message is required" });
+      return;
+    }
+    const { handlePlanVoiceTurn } = await import("./voice/plan-turn.js");
+    const reply = await handlePlanVoiceTurn(analystDeps, {
+      message,
+      chatSessionId:
+        typeof req.body?.chatSessionId === "string" ? req.body.chatSessionId.trim() : undefined,
+      history: Array.isArray(req.body?.history) ? req.body.history : [],
+      interrupted: Boolean(req.body?.interrupted),
+      deep: Boolean(req.body?.deep),
+      research: Boolean(req.body?.research),
+      skipTts: Boolean(req.body?.skipTts),
+    });
+    res.json(reply);
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "plan voice turn failed",
     });
   }
 });
@@ -471,6 +511,22 @@ app.delete("/sessions/:id", (req, res) => {
 
 const INBOX_PROJECTS = new Set<InboxProjectSlug>(["atlas", "vocallearn", "career"]);
 
+app.get("/inbox/list", (req, res) => {
+  const project = (req.query.project as InboxProjectSlug | undefined) ?? "atlas";
+  if (!INBOX_PROJECTS.has(project)) {
+    res.status(400).json({ error: "project must be atlas, vocallearn, or career" });
+    return;
+  }
+  try {
+    const files = listInboxArtifacts(registry, project);
+    res.json({ project, files });
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "inbox list failed",
+    });
+  }
+});
+
 app.post("/inbox", (req, res) => {
   const project = req.body?.project as InboxProjectSlug | undefined;
   const title = String(req.body?.title ?? "").trim();
@@ -556,8 +612,6 @@ app.post("/inbox/from-session", (req, res) => {
   }
 });
 
-const analystDeps = { db, registry, dataDir };
-
 app.post("/analyst/run", (req, res) => {
   const project = String(req.body?.project ?? "").trim();
   const focus = String(req.body?.focus ?? req.body?.userIntent ?? "").trim();
@@ -624,4 +678,6 @@ httpServer.listen(port, host, () => {
     }
     console.log(`Cached ${toStore.length} project report(s) (git HEAD refresh)`);
   }
+
+  startMorningBriefScheduler(analystDeps);
 });

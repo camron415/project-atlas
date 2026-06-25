@@ -16,7 +16,7 @@ async function applyBackgroundSession(force = false): Promise<void> {
     // the same spokenAudio profile via applyRecordingSession().
     ExpoSpeechRecognitionModule.setCategoryIOS({
       category: "playAndRecord",
-      categoryOptions: ["defaultToSpeaker", "allowBluetooth", "allowBluetoothA2DP"],
+      categoryOptions: ["allowBluetooth", "allowBluetoothA2DP"],
       mode: "spokenAudio",
     });
   } catch (error) {

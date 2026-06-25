@@ -1,7 +1,8 @@
 // Playback for the base64 MP3 that the Atlas server returns from /tts.
 import { Audio } from "expo-av";
 import { File, Paths } from "expo-file-system";
-import { prepareAudiblePlayback } from "./speech";
+import { reapplyNativeVoiceRoute, stopNativeBackgroundHold } from "atlas-audio-capture";
+import { prepareAudiblePlayback, prepareForNativeStream } from "./speech";
 
 let currentSound: Audio.Sound | null = null;
 let currentFile: File | null = null;
@@ -65,12 +66,26 @@ export async function stopPlayback(): Promise<void> {
   cleanupFile();
 }
 
+export interface PlayMp3Options {
+  /** Keep playAndRecord + speaker during an active voice session (economy TTS). */
+  voiceSession?: boolean;
+}
+
 export async function playBase64Mp3(
   base64: string,
   onStart?: () => void,
+  options?: PlayMp3Options,
 ): Promise<void> {
   await stopPlayback();
-  await prepareAudiblePlayback();
+  if (options?.voiceSession) {
+    // Stay on playAndRecord — flipping to playback ducks volume and hops system slider.
+    await prepareForNativeStream({ continuousVoice: true });
+    await reapplyNativeVoiceRoute().catch(() => {});
+  } else {
+    // Release native playAndRecord hold before expo-av playback — otherwise silent TTS.
+    await stopNativeBackgroundHold().catch(() => {});
+    await prepareAudiblePlayback();
+  }
 
   const bytes = decodeBase64ToBytes(base64);
   const file = new File(Paths.cache, `atlas_${Date.now()}.mp3`);

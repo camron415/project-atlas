@@ -35,12 +35,19 @@ See `docs/PHASE_1_5_CLOSEOUT.md` and `docs/VOICE_PHASE4.md`.
 
 **Build stamp:** `2026-06-10-chat-sessions`
 
-## Phase 1.75 — Analyst + inbox (next)
+## Phase 1.75 — Analyst + inbox ✅
 
-See `docs/PHASE_1_75.md`. Away-from-home **planning only** — analyst reviews repos,
-chief discusses, **one inbox file** at session close for Cursor.
+See `docs/PHASE_1_75.md`. Analyst jobs, chief tools, inbox writes, chat sessions.
 
-## Phase 2 — Managers + proactive Atlas (after 1.75)
+**Build stamp:** `2026-06-10-phase-175` (Realtime path) · economy stable: `2026-06-12-return-economy` (`docs/MILESTONE_2026-06-12-economy-stable.md`)
+
+## FT3 Voice economy ✅
+
+Cheap road mode: Grok STT → `/voice/plan-turn` → server TTS. See `docs/VOICE_ECONOMY.md`.
+
+**Autonomy v0:** Morning brief scheduler (`ATLAS_MORNING_BRIEF=1`).
+
+## Phase 2 — Managers + proactive Atlas (next)
 
 - [ ] Per-project manager agents
 - [ ] Scheduled reports

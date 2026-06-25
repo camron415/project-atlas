@@ -110,7 +110,16 @@ public class AtlasRealtimePlaybackModule: Module {
       options: [.defaultToSpeaker, .allowBluetoothHFP, .mixWithOthers]
     )
     try session.setActive(true, options: [])
-    try session.overrideOutputAudioPort(.speaker)
+    let route = session.currentRoute
+    let btOutput: Set<AVAudioSession.Port> = [.bluetoothHFP, .bluetoothLE, .bluetoothA2DP]
+    let hasBluetooth =
+      route.outputs.contains(where: { btOutput.contains($0.portType) })
+      || route.inputs.contains { $0.portType == .bluetoothHFP || $0.portType == .bluetoothLE }
+    if hasBluetooth {
+      try session.overrideOutputAudioPort(.none)
+    } else {
+      try session.overrideOutputAudioPort(.speaker)
+    }
   }
 
   private func ensureRunning() throws {

@@ -3,7 +3,12 @@
  * Run: npm run test:voice
  */
 import assert from "node:assert/strict";
-import { computeSilenceSubmitMs, countWords } from "./voice-endpoint";
+import {
+  computeSilenceSubmitMs,
+  computeSpeechFinalSubmitMs,
+  countWords,
+  LISTEN_IDLE_FALLBACK_MS,
+} from "./voice-endpoint";
 
 function test(name: string, fn: () => void): void {
   try {
@@ -17,8 +22,20 @@ function test(name: string, fn: () => void): void {
 
 console.log("voice-endpoint tests");
 
-test("short phrase gets ~0.8s minimum", () => {
-  assert.equal(computeSilenceSubmitMs("hi"), 800);
+test("short phrase gets ~1.5s minimum (Apple STT path)", () => {
+  assert.equal(computeSilenceSubmitMs("hi"), 1500);
+});
+
+test("speech_final debounce is immediate for normal utterances", () => {
+  assert.equal(computeSpeechFinalSubmitMs("tell me about the weather today please"), 0);
+});
+
+test("speech_final debounce waits briefly for short ambiguous finals", () => {
+  assert.equal(computeSpeechFinalSubmitMs("tell me about"), 150);
+});
+
+test("idle fallback slightly above server smart turn timeout", () => {
+  assert.equal(LISTEN_IDLE_FALLBACK_MS, 3_000);
 });
 
 test("medium phrase gets 1.6s+", () => {

@@ -28,6 +28,7 @@ public class AtlasStreamAudioModule: Module {
   private var finishTimeoutWork: DispatchWorkItem?
 
   private let audioQueue = DispatchQueue(label: "com.atlas.streamaudio.queue")
+  private var routeObserver: NSObjectProtocol?
 
   public func definition() -> ModuleDefinition {
     Name("AtlasStreamAudio")
@@ -85,6 +86,7 @@ public class AtlasStreamAudioModule: Module {
         do {
           try self.createEngineIfNeeded(sampleRate: sampleRate)
           self.audioQueue.sync {
+            self.playerNode?.stop()
             self.byteRemainder = Data()
             self.pendingBatch = Data()
             self.scheduledBufferCount = 0
@@ -137,16 +139,59 @@ public class AtlasStreamAudioModule: Module {
     self.completedBufferCount = 0
     self.isFinishedAppending = false
     self.finishContinuation = nil
+    ensureRouteObserver()
+  }
+
+  /// Match capture module: force speaker only when no Bluetooth headset is active.
+  private func bluetoothRouteActive() -> Bool {
+    let session = AVAudioSession.sharedInstance()
+    let route = session.currentRoute
+    let btOutput: Set<AVAudioSession.Port> = [.bluetoothHFP, .bluetoothLE, .bluetoothA2DP]
+    if route.outputs.contains(where: { btOutput.contains($0.portType) }) {
+      return true
+    }
+    return route.inputs.contains { input in
+      input.portType == .bluetoothHFP || input.portType == .bluetoothLE
+    }
+  }
+
+  private func applyPlaybackOutputRoute() {
+    let session = AVAudioSession.sharedInstance()
+    if bluetoothRouteActive() {
+      try? session.overrideOutputAudioPort(.none)
+    } else {
+      try? session.overrideOutputAudioPort(.speaker)
+    }
+  }
+
+  private func ensureRouteObserver() {
+    guard routeObserver == nil else { return }
+    routeObserver = NotificationCenter.default.addObserver(
+      forName: AVAudioSession.routeChangeNotification,
+      object: AVAudioSession.sharedInstance(),
+      queue: .main
+    ) { [weak self] _ in
+      self?.audioQueue.async {
+        guard let self = self, self.engine?.isRunning == true else { return }
+        self.applyPlaybackOutputRoute()
+      }
+    }
+  }
+
+  private func removeRouteObserver() {
+    if let observer = routeObserver {
+      NotificationCenter.default.removeObserver(observer)
+      routeObserver = nil
+    }
   }
 
   /// Resume the existing engine for a new turn. This only START()s an engine on
   /// an already-active session — never re-activates the session — so it works
-  /// even while the screen is locked. Re-asserts the speaker route each turn.
+  /// even while the screen is locked. Re-applies output route each turn.
   private func ensureRunning() throws {
     guard let engine = engine, let player = playerNode else { return }
-    // Just assert the speaker route — don't re-set category or activate (the
-    // capture module owns the session). overrideOutputAudioPort is safe in BG.
-    try? AVAudioSession.sharedInstance().overrideOutputAudioPort(.speaker)
+    // Don't force speaker when AirPods/Bluetooth are active — capture module owns category.
+    applyPlaybackOutputRoute()
     if !engine.isRunning {
       engine.prepare()
       try engine.start()
@@ -333,6 +378,7 @@ public class AtlasStreamAudioModule: Module {
   }
 
   private func fullTeardown(resetSession: Bool) {
+    removeRouteObserver()
     playerNode?.stop()
     engine?.stop()
     playerNode = nil

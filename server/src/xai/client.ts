@@ -14,22 +14,61 @@ export interface ChatOptions {
   maxTokens?: number;
 }
 
+export interface ToolDefinition {
+  type: "function";
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+  };
+}
+
+export interface ChatToolCall {
+  id: string;
+  type: "function";
+  function: { name: string; arguments: string };
+}
+
+export type ChatMessage =
+  | { role: "system" | "user"; content: string }
+  | { role: "assistant"; content: string | null; tool_calls?: ChatToolCall[] }
+  | { role: "tool"; tool_call_id: string; content: string };
+
+export interface ChatCompletionWithToolsResult {
+  content: string;
+  toolCalls: ChatToolCall[];
+}
+
 export async function chatCompletion(
   messages: Array<{ role: "system" | "user" | "assistant"; content: string }>,
   options: ChatOptions = {},
 ): Promise<string> {
+  const result = await chatCompletionWithTools(messages, options);
+  return result.content;
+}
+
+export async function chatCompletionWithTools(
+  messages: ChatMessage[],
+  options: ChatOptions & { tools?: ToolDefinition[] } = {},
+): Promise<ChatCompletionWithToolsResult> {
+  const body: Record<string, unknown> = {
+    model: options.model ?? process.env.XAI_CHAT_MODEL ?? "grok-4-fast-non-reasoning",
+    messages,
+    temperature: options.temperature ?? 0.4,
+    max_tokens: options.maxTokens ?? 800,
+  };
+  if (options.tools?.length) {
+    body.tools = options.tools;
+    body.tool_choice = "auto";
+  }
+
   const response = await fetch(`${XAI_API_URL}/chat/completions`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${getApiKey()}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      model: options.model ?? process.env.XAI_CHAT_MODEL ?? "grok-4-fast-non-reasoning",
-      messages,
-      temperature: options.temperature ?? 0.4,
-      max_tokens: options.maxTokens ?? 800,
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!response.ok) {
@@ -38,10 +77,19 @@ export async function chatCompletion(
   }
 
   const data = (await response.json()) as {
-    choices?: Array<{ message?: { content?: string } }>;
+    choices?: Array<{
+      message?: {
+        content?: string | null;
+        tool_calls?: ChatToolCall[];
+      };
+    }>;
   };
 
-  return data.choices?.[0]?.message?.content?.trim() ?? "";
+  const message = data.choices?.[0]?.message;
+  return {
+    content: message?.content?.trim() ?? "",
+    toolCalls: message?.tool_calls ?? [],
+  };
 }
 
 export async function rewriteWithPersona(rawResponse: string): Promise<string> {

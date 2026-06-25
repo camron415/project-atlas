@@ -11,13 +11,14 @@ import {
 } from "react-native";
 import * as Haptics from "expo-haptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import type { ChatSessionMeta } from "./api";
+import type { ChatSessionMeta, InboxListEntry } from "./api";
 
 const DELETE_WIDTH = 76;
 
 interface Props {
   visible: boolean;
   sessions: ChatSessionMeta[];
+  inboxFiles?: InboxListEntry[];
   activeSessionId: string | null;
   onClose: () => void;
   onSelect: (sessionId: string) => void;
@@ -138,6 +139,7 @@ function SwipeableSessionRow({
 export function ChatHistoryDrawer({
   visible,
   sessions,
+  inboxFiles = [],
   activeSessionId,
   onClose,
   onSelect,
@@ -166,11 +168,30 @@ export function ChatHistoryDrawer({
           <Text style={styles.newBtnText}>+ New conversation</Text>
         </Pressable>
 
+        {inboxFiles.length > 0 ? (
+          <View style={styles.inboxSection}>
+            <Text style={styles.inboxHeading}>Atlas inbox</Text>
+            {inboxFiles.slice(0, 6).map((file) => (
+              <View key={file.path} style={styles.inboxRow}>
+                <Text style={styles.inboxTitle} numberOfLines={2}>
+                  {file.title}
+                </Text>
+                <Text style={styles.inboxMeta}>{formatWhen(file.writtenAt)}</Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
+
         <FlatList
           data={sessions}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.list}
           onScrollBeginDrag={() => setOpenRowId(null)}
+          ListHeaderComponent={
+            sessions.length > 0 ? (
+              <Text style={styles.sectionHeading}>Recent chats</Text>
+            ) : null
+          }
           ListEmptyComponent={
             <Text style={styles.empty}>No saved chats yet — your turns are stored automatically.</Text>
           }
@@ -241,6 +262,45 @@ const styles = StyleSheet.create({
     color: "#e8edf5",
     fontSize: 15,
     fontWeight: "600",
+  },
+  inboxSection: {
+    marginHorizontal: 16,
+    marginBottom: 12,
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: "#151c28",
+    borderWidth: 1,
+    borderColor: "#2a3344",
+  },
+  inboxHeading: {
+    color: "#9ca8b8",
+    fontSize: 12,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+    marginBottom: 8,
+  },
+  inboxRow: {
+    marginBottom: 8,
+  },
+  inboxTitle: {
+    color: "#d8dee9",
+    fontSize: 14,
+    fontWeight: "500",
+  },
+  inboxMeta: {
+    color: "#6b7280",
+    fontSize: 11,
+    marginTop: 2,
+  },
+  sectionHeading: {
+    color: "#9ca8b8",
+    fontSize: 12,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+    marginBottom: 8,
+    paddingHorizontal: 4,
   },
   list: {
     paddingHorizontal: 8,

@@ -23,6 +23,8 @@ const IGNORABLE_MIC_ERRORS = new Set([
 
 export interface VoiceSubmitMeta {
   sttSpeakerId?: number | null;
+  /** Long field report — server gets a brief-ack hint; chat shows raw STT only. */
+  fieldMonologue?: boolean;
 }
 
 export type ListenPhase = "connecting" | "hearing" | "transcribing";
@@ -34,6 +36,8 @@ export interface VoiceCaptureOptions {
   onCaptureEnd?: () => void;
   /** Grok STT lifecycle — gives immediate feedback before partials arrive. */
   onListenPhase?: (phase: ListenPhase) => void;
+  /** Monologue mode: no auto-submit — only manual tap ends the turn. */
+  isMonologue?: () => boolean;
 }
 
 export function useVoiceCapture(options: VoiceCaptureOptions) {

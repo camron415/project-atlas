@@ -11,14 +11,18 @@
     "scan": "tsx src/cli/scan-projects.ts",
     "refresh-reports": "tsx src/cli/refresh-reports.ts",
     "analyst": "tsx src/cli/analyst.ts",
+    "morning-brief": "tsx src/cli/morning-brief.ts",
+    "test:morning-brief": "tsx src/morning-brief/run.test.ts",
     "test:stt": "tsx src/xai/stt.test.ts",
     "test:speakers": "tsx src/speakers/store.test.ts",
-    "test:inbox": "tsx src/inbox/store.test.ts"
+    "test:inbox": "tsx src/inbox/store.test.ts",
+    "test:routing": "tsx src/voice/routing.test.ts",
+    "test:search": "tsx src/context/search.test.ts"
   },
   "dependencies": {
     "better-sqlite3": "^11.9.1",
     "dotenv": "^16.5.0",
-    "express": "^5.1.0",
+    "express": "^4.21.2",
     "ws": "^8.18.2"
   },
   "devDependencies": {

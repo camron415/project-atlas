@@ -12,19 +12,81 @@ public class AtlasAudioCaptureModule: Module {
   private var isCapturing = false
   private var holdEngine: AVAudioEngine?
   private let processQueue = DispatchQueue(label: "com.atlas.audiocapture.queue")
+  private var routeObserver: NSObjectProtocol?
+  private var routeDebounceWork: DispatchWorkItem?
+
+  private func bluetoothRouteActive() -> Bool {
+    let session = AVAudioSession.sharedInstance()
+    let route = session.currentRoute
+    let btOutput: Set<AVAudioSession.Port> = [.bluetoothHFP, .bluetoothLE, .bluetoothA2DP]
+    if route.outputs.contains(where: { btOutput.contains($0.portType) }) {
+      return true
+    }
+    return route.inputs.contains { input in
+      input.portType == .bluetoothHFP || input.portType == .bluetoothLE
+    }
+  }
+
+  private func preferBluetoothInputIfAvailable() {
+    let session = AVAudioSession.sharedInstance()
+    guard let inputs = session.availableInputs else { return }
+    if let bt = inputs.first(where: { port in
+      port.portType == .bluetoothHFP || port.portType == .bluetoothLE
+    }) {
+      try? session.setPreferredInput(bt)
+    }
+  }
+
+  private func applyOutputRoute() {
+    let session = AVAudioSession.sharedInstance()
+    if bluetoothRouteActive() {
+      try? session.overrideOutputAudioPort(.none)
+    } else {
+      try? session.overrideOutputAudioPort(.speaker)
+    }
+  }
 
   /// Single recording session profile for mic capture + background hold.
-  /// JS also configures via expo, but native must be self-sufficient — Phase 2
-  /// removed this and mic input silently stopped working.
+  /// Do not use defaultToSpeaker — it pins output to the phone and breaks AirPods I/O.
   private func applyRecordingSession() throws {
     let session = AVAudioSession.sharedInstance()
     try session.setCategory(
       .playAndRecord,
       mode: .spokenAudio,
-      options: [.defaultToSpeaker, .allowBluetoothHFP, .mixWithOthers]
+      options: [.allowBluetooth, .allowBluetoothA2DP, .mixWithOthers]
     )
     try session.setActive(true, options: [])
-    try session.overrideOutputAudioPort(.speaker)
+    preferBluetoothInputIfAvailable()
+    applyOutputRoute()
+    ensureRouteObserver()
+  }
+
+  private func ensureRouteObserver() {
+    guard routeObserver == nil else { return }
+    routeObserver = NotificationCenter.default.addObserver(
+      forName: AVAudioSession.routeChangeNotification,
+      object: AVAudioSession.sharedInstance(),
+      queue: .main
+    ) { [weak self] _ in
+      guard let self = self else { return }
+      self.routeDebounceWork?.cancel()
+      let work = DispatchWorkItem { [weak self] in
+        guard let self = self else { return }
+        self.preferBluetoothInputIfAvailable()
+        self.applyOutputRoute()
+      }
+      self.routeDebounceWork = work
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: work)
+    }
+  }
+
+  private func removeRouteObserver() {
+    routeDebounceWork?.cancel()
+    routeDebounceWork = nil
+    if let observer = routeObserver {
+      NotificationCenter.default.removeObserver(observer)
+      routeObserver = nil
+    }
   }
 
   public func definition() -> ModuleDefinition {
@@ -50,6 +112,10 @@ public class AtlasAudioCaptureModule: Module {
 
     AsyncFunction("releaseAudioSession") {
       try await self.releaseAudioSession()
+    }
+
+    AsyncFunction("reapplyVoiceRoute") {
+      try await self.reapplyVoiceRoute()
     }
 
     Function("isAvailable") {
@@ -229,9 +295,23 @@ public class AtlasAudioCaptureModule: Module {
   }
 
   /// Return audio focus to other apps (YouTube, Music, etc.) when voice session ends.
+  private func reapplyVoiceRoute() async throws {
+    try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+      DispatchQueue.main.async {
+        do {
+          try self.applyRecordingSession()
+          continuation.resume()
+        } catch {
+          continuation.resume(throwing: error)
+        }
+      }
+    }
+  }
+
   private func releaseAudioSession() async throws {
     try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
       DispatchQueue.main.async {
+        self.removeRouteObserver()
         self.teardown()
         self.teardownBackgroundHold()
         do {

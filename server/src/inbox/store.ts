@@ -79,3 +79,46 @@ export function writeInboxArtifact(
     writtenAt,
   };
 }
+
+export interface InboxListEntry {
+  path: string;
+  filename: string;
+  title: string;
+  writtenAt: string;
+  project: InboxProjectSlug;
+}
+
+export function listInboxArtifacts(
+  registry: ProjectRegistry,
+  project: InboxProjectSlug,
+  limit = 24,
+): InboxListEntry[] {
+  const inboxDir = resolveInboxDir(project, registry);
+  if (!fs.existsSync(inboxDir)) return [];
+
+  const files = fs
+    .readdirSync(inboxDir)
+    .filter((name) => name.endsWith(".md"))
+    .map((filename) => {
+      const filePath = path.join(inboxDir, filename);
+      const stat = fs.statSync(filePath);
+      let title = filename.replace(/\.md$/, "");
+      try {
+        const first = fs.readFileSync(filePath, "utf8").split("\n")[0]?.trim() ?? "";
+        if (first.startsWith("# ")) title = first.slice(2).trim();
+      } catch {
+        // keep filename-based title
+      }
+      return {
+        path: filePath,
+        filename,
+        title,
+        writtenAt: stat.mtime.toISOString(),
+        project,
+      };
+    })
+    .sort((a, b) => b.writtenAt.localeCompare(a.writtenAt))
+    .slice(0, limit);
+
+  return files;
+}

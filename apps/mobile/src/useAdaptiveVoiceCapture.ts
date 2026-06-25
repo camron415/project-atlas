@@ -10,13 +10,20 @@ import {
   CAN_USE_XAI_STT,
   USE_UNIFIED_REALTIME,
   USE_VOICE_V2,
+  USE_VOICE_ECONOMY,
   voiceCaptureModeLabel,
 } from "./voice-flags";
 
-export { CAN_USE_XAI_STT, USE_UNIFIED_REALTIME, USE_VOICE_V2, voiceCaptureModeLabel };
+export {
+  CAN_USE_XAI_STT,
+  USE_UNIFIED_REALTIME,
+  USE_VOICE_V2,
+  USE_VOICE_ECONOMY,
+  voiceCaptureModeLabel,
+};
 export type { UnifiedVoiceTurnDeps, VoiceTurnDeps };
 
-/** Apple STT when xAI is off; Voice v2 / unified Path B when both flags on; else Grok STT. */
+/** Economy → Grok STT + plan-turn; else Voice v2 / Path B when unified on; else Grok or Apple STT. */
 export function useAdaptiveVoiceCapture(
   options: VoiceCaptureOptions,
   unifiedDepsRef?: MutableRefObject<UnifiedVoiceTurnDeps | VoiceTurnDeps>,
@@ -77,6 +84,29 @@ export function useAdaptiveVoiceCapture(
       await pathBCapture.startCapture();
       activeBackendRef.current = "unified";
       return;
+    }
+    if (USE_VOICE_ECONOMY) {
+      if (!CAN_USE_XAI_STT) {
+        throw new Error(
+          "Voice economy requires Grok STT (EXPO_PUBLIC_XAI_STT=1 and native capture).",
+        );
+      }
+      let lastError: unknown;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          await xaiCapture.startCapture();
+          activeBackendRef.current = "xai";
+          return;
+        } catch (error) {
+          lastError = error;
+          if (attempt < 2) {
+            await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+          }
+        }
+      }
+      throw lastError instanceof Error
+        ? lastError
+        : new Error("Grok STT failed to start after retries.");
     }
     if (CAN_USE_XAI_STT) {
       await xaiCapture.startCapture();

@@ -7,6 +7,7 @@ import type { InboxProjectSlug } from "../inbox/types.js";
 import { simplifyAnalystBrief } from "./focus.js";
 import { enqueueAnalystJob, type AnalystRunDeps } from "./run.js";
 import { getAnalystJob } from "./store.js";
+import { waitForAnalystJob } from "./wait.js";
 
 export interface ToolExecuteContext {
   db: Database.Database;
@@ -27,21 +28,6 @@ function parseArgs(raw: string): Record<string, unknown> {
 function inboxProject(value: unknown): InboxProjectSlug | null {
   if (value === "atlas" || value === "vocallearn" || value === "career") return value;
   return null;
-}
-
-async function waitForAnalystDone(
-  ctx: ToolExecuteContext,
-  jobId: string,
-  maxMs = 120_000,
-): Promise<ReturnType<typeof getAnalystJob>> {
-  const started = Date.now();
-  while (Date.now() - started < maxMs) {
-    const job = getAnalystJob(ctx.db, jobId);
-    if (!job) return null;
-    if (job.status === "done" || job.status === "error") return job;
-    await new Promise((r) => setTimeout(r, 1500));
-  }
-  return getAnalystJob(ctx.db, jobId);
 }
 
 export async function executeAnalystTool(
@@ -86,7 +72,7 @@ export async function executeAnalystTool(
       deep,
     });
 
-    const job = await waitForAnalystDone(ctx, jobId);
+    const job = await waitForAnalystJob(ctx.db, jobId);
     if (!job) {
       return JSON.stringify({ ok: false, error: "job_not_found", job_id: jobId });
     }
