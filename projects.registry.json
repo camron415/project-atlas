@@ -18,7 +18,9 @@
         "docs/PHASE_1_5_CLOSEOUT.md",
         "docs/VOICE_PHASE4.md",
         "docs/VOICE_BASELINE.md",
-        "docs/inbox/README.md"
+        "docs/inbox/README.md",
+        "docs/LEARNING_LEDGER.md",
+        "docs/LEARNING_TUTOR.md"
       ],
       "reportCadence": "daily",
       "workers": []

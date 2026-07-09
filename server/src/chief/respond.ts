@@ -5,6 +5,9 @@ import { responsesCompletion } from "../xai/responses.js";
 import { AtlasModels } from "../models/router.js";
 import { loadRegistry } from "../projects/registry.js";
 import { buildStandupMemoryBlock } from "../standup/context.js";
+import { buildLearningMemoryBlock } from "../learning/context.js";
+import { TUTOR_MODE_ADDON } from "../learning/instructions.js";
+import { applyTutorTriggers, stripTutorTriggers } from "../learning/triggers.js";
 import {
   looksDeep as detectDeep,
   looksPlanning as detectPlanning,
@@ -53,6 +56,7 @@ export interface ChiefRequest {
   skipPersona?: boolean;
   /** Conversational voice instructions. */
   voice?: boolean;
+  chatSessionId?: string;
 }
 
 export interface ChiefReplyMeta extends ChiefReply {
@@ -79,7 +83,14 @@ export async function answerChiefMessage(
   const history = normalizeHistory(request.history);
   const registry = loadRegistry();
   const context = buildChiefContext(db);
-  const standupMemory = buildStandupMemoryBlock(db, registry);
+
+  const tutorOn = applyTutorTriggers(userMessage, request.chatSessionId);
+  const routedMessage = tutorOn ? stripTutorTriggers(userMessage) : userMessage;
+  const effectiveMessage =
+    routedMessage || (tutorOn ? "Continue our study session." : userMessage);
+
+  const standupMemory = tutorOn ? "" : buildStandupMemoryBlock(db, registry);
+  const tutorMemory = tutorOn ? `${TUTOR_MODE_ADDON}\n\n${buildLearningMemoryBlock(registry)}` : "";
   const deep = request.voice
     ? Boolean(request.deep) || detectDeep(userMessage)
     : Boolean(request.deep) ||
@@ -101,15 +112,18 @@ export async function answerChiefMessage(
     : "";
 
   const latestUserContent = request.interrupted
-    ? `[User interrupted while you were speaking. Continue the conversation naturally and address this next input.] ${userMessage}`
-    : userMessage;
+    ? `[User interrupted while you were speaking. Continue the conversation naturally and address this next input.] ${effectiveMessage}`
+    : effectiveMessage;
 
   const voiceHint = request.voice ? `\n${VOICE_CONVERSATIONAL}` : "";
+  const tutorHint = tutorOn
+    ? "\n## Study mode\nYou are tutoring Camron. Follow LEARNING_TUTOR.md. One concept, one micro-proof, quiz if possible. Up to ~8 sentences."
+    : "";
 
   const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
     {
       role: "system",
-      content: `${CHIEF_SYSTEM}${voiceHint}${deepHint}${researchHint}\n\n${standupMemory}\n\n## Cached project context\n${context}`,
+      content: `${CHIEF_SYSTEM}${voiceHint}${tutorHint}${deepHint}${researchHint}\n\n${tutorMemory}${standupMemory ? `\n\n${standupMemory}` : ""}\n\n## Cached project context\n${context}`,
     },
     ...history.map((turn) => ({
       role: turn.role,

@@ -90,6 +90,8 @@ function indexAtlasOrchestratorDocs(db: Database.Database, registry: ProjectRegi
     "docs/managers/ATLAS_POLICY.md",
     "docs/STANDUP_IMPLEMENTATION.md",
     "docs/ROADMAP.md",
+    "docs/LEARNING_LEDGER.md",
+    "docs/LEARNING_TUTOR.md",
   ];
   let count = 0;
   for (const rel of rels) {

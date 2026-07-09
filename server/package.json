@@ -20,7 +20,8 @@
     "test:inbox": "tsx src/inbox/store.test.ts",
     "test:routing": "tsx src/voice/routing.test.ts",
     "test:search": "tsx src/context/search.test.ts",
-    "test:cost": "tsx src/cost/ledger.test.ts"
+    "test:cost": "tsx src/cost/ledger.test.ts",
+    "test:learning": "tsx src/learning/triggers.test.ts"
   },
   "dependencies": {
     "better-sqlite3": "^11.9.1",

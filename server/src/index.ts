@@ -445,6 +445,8 @@ app.post("/chat", async (req, res) => {
       interrupted: Boolean(req.body?.interrupted),
       deep: Boolean(req.body?.deep),
       research: Boolean(req.body?.research),
+      chatSessionId:
+        typeof req.body?.chatSessionId === "string" ? req.body.chatSessionId.trim() : undefined,
     });
     slog(
       `/chat deep=${reply.deep} research=${reply.research} model=${reply.model} chars=${reply.filtered.length}`,

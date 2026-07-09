@@ -11,6 +11,9 @@ import { sanitizeVoiceReply } from "./voice-sanitize.js";
 import { buildStandupMemoryBlock } from "../standup/context.js";
 import { STANDUP_MODERATOR_ADDON } from "../standup/instructions.js";
 import { isStandupActive } from "../standup/session-state.js";
+import { buildLearningMemoryBlock } from "../learning/context.js";
+import { TUTOR_MODE_ADDON } from "../learning/instructions.js";
+import { applyTutorTriggers, stripTutorTriggers } from "../learning/triggers.js";
 
 export interface PlanVoiceTurnRequest {
   message: string;
@@ -136,30 +139,41 @@ async function runVoiceChiefLoop(
   const userMessage = req.message.trim();
   const history = normalizeHistory(req.history);
   const deep = Boolean(req.deep);
-  const latestUser = req.interrupted
-    ? `[User interrupted while you were speaking. Address this next input naturally.] ${userMessage}`
-    : userMessage;
-
-  const maxTokens = deep ? 800 : 400;
   const model = deep ? AtlasModels.deep() : AtlasModels.fast();
 
+  const tutorOn = applyTutorTriggers(userMessage, req.chatSessionId);
+  const routedForTutor = tutorOn ? stripTutorTriggers(userMessage) : userMessage;
+  const latestForLoop = req.interrupted
+    ? `[User interrupted while you were speaking. Address this next input naturally.] ${routedForTutor || "Continue our study session."}`
+    : routedForTutor || (tutorOn ? "Continue our study session." : userMessage);
+
   const standupOn =
-    Boolean(req.standupMode) || isStandupActive(req.chatSessionId ?? null);
+    !tutorOn &&
+    (Boolean(req.standupMode) || isStandupActive(req.chatSessionId ?? null));
   const standupBlock = standupOn
     ? `${STANDUP_MODERATOR_ADDON}\n\n${buildStandupMemoryBlock(deps.db, deps.registry)}`
     : buildStandupMemoryBlock(deps.db, deps.registry);
 
+  const tutorBlock = tutorOn
+    ? `${TUTOR_MODE_ADDON}\n\n${buildLearningMemoryBlock(deps.registry)}`
+    : "";
+  const brevity = tutorOn
+    ? "Study mode: teaching replies may be up to ~8 sentences. Still speak plainly — no tool names or file paths."
+    : VOICE_BREVITY;
+
   const messages: ChatMessage[] = [
     {
       role: "system",
-      content: `${VOICE_CHIEF_SYSTEM}\n\n${standupBlock}\n\n## Context manifest\n${buildManifestBlock(deps.db)}\n\n${VOICE_BREVITY}`,
+      content: `${VOICE_CHIEF_SYSTEM}\n\n${tutorBlock}${standupBlock ? `\n\n${standupBlock}` : ""}\n\n## Context manifest\n${buildManifestBlock(deps.db)}\n\n${brevity}`,
     },
     ...history.map((turn) => ({
       role: turn.role,
       content: turn.content,
     })),
-    { role: "user", content: latestUser },
+    { role: "user", content: latestForLoop },
   ];
+
+  const maxTokens = tutorOn ? (deep ? 900 : 650) : deep ? 800 : 400;
 
   let analystMeta: Partial<PlanVoiceTurnReply> | undefined;
   const toolCtx = {
