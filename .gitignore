@@ -12,3 +12,8 @@ server/data/transcripts.jsonl
 .DS_Store
 *.log
 server/data/analyst/
+
+# Machine-specific (copy from *.example.json)
+config/network.local.json
+projects.registry.local.json
+inbox/

@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "projectsRoot": "/path/to/your/projects",
+  "projects": [
+    {
+      "slug": "atlas",
+      "name": "Atlas",
+      "priority": 0,
+      "status": "active",
+      "path": "/path/to/your/projects/atlas",
+      "roadmapFiles": ["README.md", "docs/HANDOFF.md", "docs/ROADMAP.md"],
+      "reportCadence": "daily",
+      "workers": []
+    },
+    {
+      "slug": "vocalllearn",
+      "name": "VocalLearn",
+      "priority": 1,
+      "status": "active",
+      "path": "/path/to/your/vocalLearn",
+      "targetPath": "/path/to/your/projects/vocalLearn",
+      "roadmapFiles": ["README.md", "docs/ROADMAP.md"],
+      "reportCadence": "daily",
+      "workers": []
+    },
+    {
+      "slug": "career-dashboard",
+      "name": "Career Dashboard",
+      "priority": 2,
+      "status": "active",
+      "path": "/path/to/your/career-planning-roadmap/career-dashboard",
+      "roadmapFiles": ["README.md", "docs/ROADMAP.md"],
+      "reportCadence": "daily",
+      "workers": []
+    }
+  ]
+}

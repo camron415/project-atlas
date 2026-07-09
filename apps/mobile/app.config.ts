@@ -2,11 +2,10 @@ import type { ConfigContext, ExpoConfig } from "expo/config";
 
 import withAtlasAts from "./plugins/withAtlasAts";
 
-const TS_IP = process.env.ATLAS_TAILSCALE_IP ?? "100.127.118.18";
-const LAN_IP = process.env.ATLAS_LAN_IP ?? "10.0.0.84";
-const TAILNET = process.env.ATLAS_TAILNET ?? "tail5f7dec.ts.net";
-const TS_HOST =
-  process.env.ATLAS_TAILSCALE_HOST ?? "macbook-air-de-camron.tail5f7dec.ts.net";
+const TS_IP = process.env.ATLAS_TAILSCALE_IP ?? "";
+const LAN_IP = process.env.ATLAS_LAN_IP ?? "127.0.0.1";
+const TAILNET = process.env.ATLAS_TAILNET ?? "";
+const TS_HOST = process.env.ATLAS_TAILSCALE_HOST ?? "";
 
 export default ({ config }: ConfigContext): ExpoConfig => {
   let expoConfig: ExpoConfig = {
