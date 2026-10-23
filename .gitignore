@@ -17,3 +17,7 @@ server/data/analyst/
 config/network.local.json
 projects.registry.local.json
 inbox/
+
+# Phone voice gate. Copy call-url.example to call-url.local.
+ios/AtlasVoice/call-url.local
+server/voice-local/__pycache__/

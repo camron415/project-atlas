@@ -1,0 +1,753 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Atlas" />
+  <meta name="theme-color" content="#121410" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="/icon-180.png" />
+  <title>Atlas</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #121410;
+      --card: #1c1f18;
+      --ink: #f4f1e8;
+      --muted: #a8a394;
+      --line: #34382e;
+      --gold: #e2c56b;
+      --hold: #c4553a;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      min-height: 100dvh;
+      background: var(--bg);
+      color: var(--ink);
+      font: 17px/1.45 "Iowan Old Style", Palatino, Georgia, serif;
+    }
+    main {
+      max-width: 720px;
+      min-height: 100dvh;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      padding:
+        calc(18px + env(safe-area-inset-top))
+        20px
+        calc(18px + env(safe-area-inset-bottom));
+    }
+    h1 { font-weight: 500; font-size: 28px; margin: 0 0 6px; }
+    .sub, .status, .meta, summary { color: var(--muted); }
+    .status { min-height: 1.4em; margin: 14px 0 8px; }
+    button, textarea { font: inherit; }
+    .hold {
+      width: 100%;
+      margin-top: auto;
+      border: 0;
+      border-radius: 22px;
+      min-height: 88px;
+      padding: 22px 16px;
+      background: var(--gold);
+      color: #1a160c;
+      font-size: 24px;
+      cursor: pointer;
+    }
+    .hold.live { background: var(--hold); color: white; }
+    .hold:disabled { opacity: 0.45; cursor: wait; }
+    details { margin-top: 14px; }
+    summary { cursor: pointer; }
+    form { display: flex; gap: 8px; margin-top: 12px; }
+    textarea {
+      flex: 1;
+      resize: vertical;
+      min-height: 52px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: var(--card);
+      color: var(--ink);
+      padding: 12px;
+    }
+    form button, .ghost {
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: var(--card);
+      color: var(--ink);
+      padding: 0 16px;
+      cursor: pointer;
+    }
+    .row { display: flex; gap: 8px; margin-top: 10px; }
+    .log {
+      margin-top: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      overflow: auto;
+      max-height: 38dvh;
+    }
+    .bubble { background: var(--card); border-radius: 14px; padding: 12px 14px; }
+    .bubble b { display: block; font-size: 13px; letter-spacing: 0.04em; color: var(--gold); font-weight: 600; }
+    .bubble p { margin: 4px 0 0; }
+    .bubble.live-you p { color: var(--muted); font-style: italic; }
+    .status.speaking { cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+    .meta { font-size: 13px; margin: 8px 0 0; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Atlas</h1>
+    <p class="sub">Leave this open. A pause does not send until you sound finished. Talk over her when you want her to stop.</p>
+    <p class="status" id="status">Starting…</p>
+    <div class="log" id="log"></div>
+    <p class="meta" id="meta"></p>
+    <button class="hold" id="call" disabled>Start call</button>
+    <details>
+      <summary>Type instead</summary>
+      <form id="typed">
+        <textarea id="text" rows="2" placeholder="Or type a turn"></textarea>
+        <button type="submit">Send</button>
+      </form>
+      <div class="row">
+        <button class="ghost" id="hello" type="button">Hear a test line</button>
+        <button class="ghost" id="clear" type="button">Clear</button>
+      </div>
+    </details>
+  </main>
+  <script>
+    const statusEl = document.querySelector("#status");
+    const callBtn = document.querySelector("#call");
+    const log = document.querySelector("#log");
+    const meta = document.querySelector("#meta");
+    const form = document.querySelector("#typed");
+    const text = document.querySelector("#text");
+    const CHECK_MS = 280;
+    const HOLD_MAX_MS = 3200;
+    const SPEECH_RMS = 0.035;
+    const BARGE_FLOOR = 0.024;
+    const BARGE_MS = 300;
+    const PARTIAL_MS = 1700;
+    const params = new URLSearchParams(location.search);
+    if (params.get("k")) localStorage.setItem("atlas-gate", params.get("k"));
+    const gateKey = params.get("k") || localStorage.getItem("atlas-gate") || "";
+
+    let stream = null;
+    let audioCtx = null;
+    let analyser = null;
+    let pcmChunks = [];
+    let pcmSamples = 0;
+    let busy = false;
+    let ready = false;
+    let callOn = false;
+    let listening = false;
+    let heardSpeech = false;
+    let silenceMs = 0;
+    let lastTick = 0;
+    let playing = false;
+    let currentSource = null;
+    let epoch = 0;
+    let wakeLock = null;
+    let probeBusy = false;
+    let probeAbort = null;
+    let probeGen = 0;
+    let bargeMs = 0;
+    let nextProbeAt = CHECK_MS;
+    let armedForce = false;
+    let turnToken = 0;
+    let abortTurn = null;
+    let liveToken = 0;
+    let liveYou = null;
+    let partialBusy = false;
+    let partialAt = 0;
+    let playbackFloor = 0.02;
+    let clipFloor = 0.02;
+    let playGen = 0;
+    const audioQueue = [];
+
+    function setStatus(value) { statusEl.textContent = value; }
+
+    function withGate(init = {}) {
+      const headers = new Headers(init.headers || {});
+      if (gateKey) headers.set("X-Atlas-Gate", gateKey);
+      return { ...init, headers };
+    }
+
+    function withTurn(init, token) {
+      const next = withGate(init);
+      if (token) next.headers.set("X-Atlas-Turn", String(token));
+      return next;
+    }
+
+    function addBubble(who, body, extraClass = "") {
+      const el = document.createElement("div");
+      el.className = "bubble" + (extraClass ? ` ${extraClass}` : "");
+      const title = document.createElement("b");
+      title.textContent = who;
+      const p = document.createElement("p");
+      p.textContent = body;
+      el.append(title, p);
+      log.prepend(el);
+      return p;
+    }
+
+    function holdCallSession() {
+      if (navigator.audioSession) navigator.audioSession.type = "play-and-record";
+      if (audioCtx && audioCtx.state !== "running") audioCtx.resume().catch(() => {});
+    }
+
+    function stopSpeaking() {
+      playGen += 1;
+      audioQueue.length = 0;
+      if (currentSource) {
+        try { currentSource.onended = null; currentSource.stop(); } catch { /* already stopped */ }
+        currentSource = null;
+      }
+      playing = false;
+    }
+
+    function enqueueWav(b64) {
+      audioQueue.push(b64);
+      if (!playing) playNext();
+    }
+
+    function playNext() {
+      const b64 = audioQueue.shift();
+      if (!b64) {
+        playing = false;
+        statusEl.classList.remove("speaking");
+        currentSource = null;
+        if (callOn && !busy) armListen();
+        else if (!busy) setStatus(callOn ? "Listening…" : "Ready");
+        return;
+      }
+      const gen = ++playGen;
+      playing = true;
+      clipFloor = playbackFloor;
+      holdCallSession();
+      const binary = atob(b64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      statusEl.classList.add("speaking");
+      setStatus("Speaking… tap here to interrupt");
+      playBuffer(bytes.buffer, gen).then((finished) => {
+        if (finished && gen === playGen) playNext();
+      });
+    }
+
+    function playBuffer(arrayBuffer, gen) {
+      const ctx = audioCtx;
+      if (!ctx) return Promise.resolve(false);
+      return ctx.decodeAudioData(arrayBuffer.slice(0)).then((buffer) => new Promise((resolve) => {
+        if (gen !== playGen) {
+          resolve(false);
+          return;
+        }
+        const source = ctx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(ctx.destination);
+        currentSource = source;
+        source.onended = () => {
+          if (currentSource === source) currentSource = null;
+          resolve(true);
+        };
+        try { source.start(); }
+        catch { resolve(false); }
+      })).catch(() => false);
+    }
+
+    function bargeSignal(rms) {
+      const floor = Math.max(BARGE_FLOOR, clipFloor, playbackFloor);
+      return rms > floor * 1.8 + 0.012;
+    }
+
+    function wavFromPcm(maxSeconds) {
+      const rate = audioCtx ? audioCtx.sampleRate : 48000;
+      if (!pcmSamples || !rate) return null;
+      let frames = pcmChunks;
+      let count = pcmSamples;
+      if (maxSeconds) {
+        const need = Math.floor(rate * maxSeconds);
+        frames = [];
+        count = 0;
+        for (let i = pcmChunks.length - 1; i >= 0 && count < need; i--) {
+          frames.push(pcmChunks[i]);
+          count += pcmChunks[i].length;
+        }
+        frames.reverse();
+      }
+      if (count < rate * 0.3) return null;
+      const buffer = new ArrayBuffer(44 + count * 2);
+      const view = new DataView(buffer);
+      const write = (offset, text) => { for (let i = 0; i < text.length; i++) view.setUint8(offset + i, text.charCodeAt(i)); };
+      write(0, "RIFF");
+      view.setUint32(4, 36 + count * 2, true);
+      write(8, "WAVE");
+      write(12, "fmt ");
+      view.setUint32(16, 16, true);
+      view.setUint16(20, 1, true);
+      view.setUint16(22, 1, true);
+      view.setUint32(24, rate, true);
+      view.setUint32(28, rate * 2, true);
+      view.setUint16(32, 2, true);
+      view.setUint16(34, 16, true);
+      write(36, "data");
+      view.setUint32(40, count * 2, true);
+      let offset = 44;
+      for (const frame of frames) {
+        for (let i = 0; i < frame.length && offset < buffer.byteLength; i++) {
+          const sample = Math.max(-1, Math.min(1, frame[i]));
+          view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+          offset += 2;
+        }
+      }
+      return new Blob([buffer], { type: "audio/wav" });
+    }
+
+    function notePcm(event) {
+      if (!listening) return;
+      const data = event.inputBuffer.getChannelData(0);
+      pcmChunks.push(new Float32Array(data));
+      pcmSamples += data.length;
+      const cap = (audioCtx?.sampleRate || 48000) * 90;
+      while (pcmSamples > cap && pcmChunks.length > 1) pcmSamples -= pcmChunks.shift().length;
+    }
+
+    async function sendPartial() {
+      if (!callOn || !listening || busy || playing || probeBusy || partialBusy || !heardSpeech) return;
+      const blob = wavFromPcm(8);
+      if (!blob) return;
+      partialBusy = true;
+      const body = new FormData();
+      body.append("audio", blob, "hear.wav");
+      try {
+        const res = await fetch("/hear", withGate({ method: "POST", body }));
+        if (!res.ok || !listening) return;
+        const data = await res.json();
+        if (data.busy || !data.text) return;
+        if (!liveYou) liveYou = addBubble("You", "…", "live-you");
+        liveYou.textContent = data.text;
+        liveYou.closest(".bubble")?.classList.add("live-you");
+      } catch { /* offline or server busy */ }
+      finally { partialBusy = false; }
+    }
+
+    async function poll() {
+      try {
+        const res = await fetch("/health");
+        const data = await res.json();
+        if (!meta.textContent) meta.textContent = data.detail || "";
+        if (data.ready) {
+          ready = true;
+          callBtn.disabled = false;
+          if (!callOn && !busy) setStatus("Ready");
+          if (!callOn && params.has("call")) {
+            startCall().catch((err) => {
+              callOn = false;
+              callBtn.classList.remove("live");
+              callBtn.textContent = "Start call";
+              setStatus(err.message || "Tap Start call to allow the microphone.");
+            });
+          }
+          return;
+        }
+        setStatus(data.detail || "Loading models…");
+      } catch {
+        setStatus("This Mac is not answering yet.");
+      }
+      setTimeout(poll, 1000);
+    }
+
+    async function readBody(res, token, you, reply) {
+      if (!res.ok || !res.body) {
+        setStatus("I lost that. Say it once more.");
+        if (reply) reply.textContent = "";
+        return;
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done || token !== turnToken) break;
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() || "";
+        for (const part of parts) handleEvent(part, you, reply);
+      }
+      if (token === turnToken && buffer.trim()) handleEvent(buffer, you, reply);
+    }
+
+    async function runTurn(body, label) {
+      if (!ready) return;
+      const token = ++turnToken;
+      liveToken = token;
+      const ctrl = new AbortController();
+      abortTurn = ctrl;
+      busy = true;
+      holdCallSession();
+      stopListen();
+      setStatus("Thinking… tap here to interrupt");
+      statusEl.classList.add("speaking");
+      const you = liveYou || (label ? addBubble("You", label) : null);
+      if (you && label) {
+        you.textContent = label;
+        you.closest(".bubble")?.classList.remove("live-you");
+      }
+      const reply = addBubble("Atlas", "");
+      try {
+        const init = withTurn({ method: "POST", signal: ctrl.signal }, token);
+        if (typeof body === "string") {
+          init.headers.set("Content-Type", "application/json");
+          init.body = body;
+        } else {
+          init.body = body;
+        }
+        const res = await fetch("/turn", init);
+        if (token !== turnToken || !callOn) return;
+        await readBody(res, token, you, reply);
+      } catch (err) {
+        if (token === turnToken && err.name !== "AbortError") reply.textContent = err.message || String(err);
+      } finally {
+        if (token === turnToken) {
+          busy = false;
+          if (!playing && !audioQueue.length) {
+            statusEl.classList.remove("speaking");
+          }
+          if (callOn && !playing && !audioQueue.length) armListen();
+          else if (!callOn && !playing) setStatus("Ready");
+        }
+      }
+    }
+
+    function dropProbe(token) {
+      probeGen += 1;
+      if (probeAbort) probeAbort.abort();
+      probeBusy = false;
+      if (token) fetch("/cancel", withTurn({ method: "POST" }, token)).catch(() => {});
+    }
+
+    function bargeIn() {
+      if (!callOn) return;
+      const token = liveToken;
+      turnToken += 1;
+      epoch += 1;
+      if (abortTurn) abortTurn.abort();
+      if (probeAbort) probeAbort.abort();
+      fetch("/cancel", withTurn({ method: "POST" }, token)).catch(() => {});
+      stopListen();
+      stopSpeaking();
+      statusEl.classList.remove("speaking");
+      busy = false;
+      probeBusy = false;
+      playing = false;
+      bargeMs = 0;
+      armedForce = false;
+      nextProbeAt = CHECK_MS;
+      armListen();
+      heardSpeech = true;
+      silenceMs = 0;
+      setStatus("Listening…");
+    }
+
+    async function considerEnd(force) {
+      if (!callOn || busy || !listening) return;
+      if (!force && probeBusy) return;
+      const blob = wavFromPcm();
+      if (!blob) return;
+      if (force && probeBusy) dropProbe(liveToken);
+      const gen = ++probeGen;
+      const token = ++turnToken;
+      liveToken = token;
+      const ctrl = new AbortController();
+      if (force) {
+        busy = true;
+        stopListen();
+        setStatus("Thinking…");
+      } else {
+        probeBusy = true;
+        probeAbort = ctrl;
+      }
+      abortTurn = ctrl;
+      const body = new FormData();
+      body.append("audio", blob, "turn.wav");
+      if (!force) body.append("probe", "1");
+      let you = null;
+      let reply = null;
+      try {
+        const res = await fetch("/turn", withTurn({ method: "POST", body, signal: ctrl.signal }, token));
+        if (gen !== probeGen || !callOn) {
+          fetch("/cancel", withTurn({ method: "POST" }, token)).catch(() => {});
+          return;
+        }
+        if (!res.ok) {
+          probeBusy = false;
+          setStatus("I lost that. Say it once more.");
+          return;
+        }
+        const ctype = res.headers.get("content-type") || "";
+        if (!force && ctype.includes("json")) {
+          await res.json();
+          probeBusy = false;
+          return;
+        }
+        probeBusy = false;
+        busy = true;
+        stopListen();
+        setStatus("Thinking…");
+        you = liveYou || addBubble("You", "…");
+        if (liveYou) liveYou.closest(".bubble")?.classList.remove("live-you");
+        reply = addBubble("Atlas", "");
+        await readBody(res, token, you, reply);
+      } catch (err) {
+        probeBusy = false;
+        if (err.name === "AbortError" || token !== turnToken) return;
+        if (!reply) reply = addBubble("Atlas", "");
+        reply.textContent = err.message || String(err);
+      } finally {
+        if (token === turnToken) {
+          busy = false;
+          probeBusy = false;
+          if (callOn && !playing && !audioQueue.length) armListen();
+        }
+      }
+    }
+
+    function handleEvent(part, you, reply) {
+      let event = "message";
+      const dataLines = [];
+      for (const line of part.split("\n")) {
+        if (line.startsWith("event:")) event = line.slice(6).trim();
+        else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+      }
+      if (!dataLines.length) return;
+      const data = JSON.parse(dataLines.join("\n"));
+      if (event === "restart") {
+        stopSpeaking();
+        if (reply) reply.textContent = "";
+        playing = false;
+      }
+      if (event === "status") setStatus(data.detail || data.stage || "Working…");
+      if (event === "transcript" && you) {
+        you.textContent = data.text || "(silence)";
+        you.closest(".bubble")?.classList.remove("live-you");
+      }
+      if (event === "delta") reply.textContent += data.text || "";
+      if (event === "audio" && data.wav_b64) enqueueWav(data.wav_b64);
+      if (event === "done" && data.text) reply.textContent = data.text;
+      if (event === "done" && data.timing) {
+        const t = data.timing;
+        meta.textContent = `Heard ${t.stt_ms || 0} ms · first words ${t.first_token_ms || 0} ms · first audio ${t.first_audio_ms || 0} ms`;
+      }
+      if (event === "error") reply.textContent = data.message || "Turn failed.";
+    }
+
+    async function holdWake() {
+      try {
+        if (navigator.wakeLock) wakeLock = await navigator.wakeLock.request("screen");
+      } catch { /* the screen may still sleep if iOS refuses */ }
+    }
+
+    function releaseWake() {
+      if (wakeLock) wakeLock.release().catch(() => {});
+      wakeLock = null;
+    }
+
+    async function ensureMic() {
+      if (stream) return stream;
+      if (navigator.audioSession) navigator.audioSession.type = "play-and-record";
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          channelCount: 1,
+        },
+      });
+      audioCtx = new AudioContext();
+      await audioCtx.resume();
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 512;
+      const mic = audioCtx.createMediaStreamSource(stream);
+      mic.connect(analyser);
+      const mute = audioCtx.createGain();
+      mute.gain.value = 0;
+      const capture = audioCtx.createScriptProcessor(4096, 1, 1);
+      capture.onaudioprocess = notePcm;
+      mic.connect(capture);
+      capture.connect(mute);
+      mute.connect(audioCtx.destination);
+      holdCallSession();
+      return stream;
+    }
+
+    function armListen() {
+      if (!callOn || busy || playing || listening || !stream) return;
+      pcmChunks = [];
+      pcmSamples = 0;
+      heardSpeech = false;
+      silenceMs = 0;
+      lastTick = 0;
+      partialAt = 0;
+      liveYou = null;
+      nextProbeAt = CHECK_MS;
+      armedForce = false;
+      listening = true;
+      setStatus("Listening…");
+    }
+
+    function stopListen() {
+      listening = false;
+      heardSpeech = false;
+    }
+
+    function watch() {
+      requestAnimationFrame(watch);
+      if (!analyser || !callOn) return;
+      if (playing || busy) holdCallSession();
+      if (audioCtx && audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
+      const data = new Uint8Array(analyser.fftSize);
+      analyser.getByteTimeDomainData(data);
+      let sum = 0;
+      for (let i = 0; i < data.length; i++) {
+        const x = (data[i] - 128) / 128;
+        sum += x * x;
+      }
+      const rms = Math.sqrt(sum / data.length);
+      const now = performance.now();
+      const dt = lastTick ? now - lastTick : 16;
+      lastTick = now;
+      if (playing || busy) {
+        playbackFloor = playbackFloor * 0.94 + rms * 0.06;
+        if (bargeSignal(rms)) {
+          bargeMs += dt;
+          if (bargeMs >= BARGE_MS) bargeIn();
+        } else {
+          bargeMs = Math.max(0, bargeMs - dt * 0.5);
+        }
+        return;
+      }
+      if (!listening) return;
+      if (rms > SPEECH_RMS) {
+        if (!heardSpeech) {
+          setStatus("Hearing you…");
+          if (!liveYou) liveYou = addBubble("You", "…", "live-you");
+        }
+        heardSpeech = true;
+        silenceMs = 0;
+        armedForce = false;
+        nextProbeAt = CHECK_MS;
+        bargeMs = 0;
+        if (probeBusy) dropProbe(liveToken);
+        if (!partialAt) partialAt = now;
+        else if (!partialBusy && now - partialAt >= PARTIAL_MS) {
+          partialAt = now;
+          sendPartial();
+        }
+      } else if (heardSpeech) {
+        silenceMs += dt;
+        if (!armedForce && silenceMs >= HOLD_MAX_MS) {
+          armedForce = true;
+          considerEnd(true);
+        } else if (!probeBusy && silenceMs >= nextProbeAt && silenceMs < HOLD_MAX_MS) {
+          nextProbeAt = silenceMs + 500;
+          considerEnd(false);
+        }
+      }
+    }
+
+    function playClip(url) {
+      const gen = ++playGen;
+      playing = true;
+      statusEl.classList.add("speaking");
+      setStatus("Speaking… tap here to interrupt");
+      holdCallSession();
+      return fetch(url, withGate({})).then(async (res) => {
+        if (!res.ok) throw new Error("Greeting did not load.");
+        await playBuffer(await res.arrayBuffer(), gen);
+        if (gen === playGen) {
+          playing = false;
+          statusEl.classList.remove("speaking");
+        }
+      });
+    }
+
+    async function startCall() {
+      callOn = true;
+      callBtn.classList.add("live");
+      callBtn.textContent = "End call";
+      await holdWake();
+      await ensureMic();
+      const unlock = audioCtx.createBuffer(1, 1, 22050);
+      const source = audioCtx.createBufferSource();
+      source.buffer = unlock;
+      source.connect(audioCtx.destination);
+      source.start();
+      await playClip("/greeting");
+      if (callOn && !busy) armListen();
+    }
+
+    function endCall() {
+      const token = liveToken;
+      turnToken += 1;
+      epoch += 1;
+      callOn = false;
+      busy = false;
+      probeBusy = false;
+      if (abortTurn) abortTurn.abort();
+      if (probeAbort) probeAbort.abort();
+      fetch("/cancel", withTurn({ method: "POST" }, token)).catch(() => {});
+      callBtn.classList.remove("live");
+      callBtn.textContent = "Start call";
+      stopListen();
+      stopSpeaking();
+      statusEl.classList.remove("speaking");
+      releaseWake();
+      setStatus("Ready");
+    }
+
+    statusEl.addEventListener("click", () => {
+      if (callOn && (playing || busy)) bargeIn();
+    });
+
+    callBtn.addEventListener("click", () => {
+      if (!ready) return;
+      if (callOn) endCall();
+      else startCall().catch((err) => {
+        callOn = false;
+        callBtn.classList.remove("live");
+        callBtn.textContent = "Start call";
+        setStatus(err.message || "Tap Start call to allow the microphone.");
+      });
+    });
+
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible" && callOn) holdWake();
+    });
+
+    form.addEventListener("submit", (ev) => {
+      ev.preventDefault();
+      const value = text.value.trim();
+      if (!value || busy) return;
+      text.value = "";
+      runTurn(JSON.stringify({ text: value }), value);
+    });
+
+    document.querySelector("#hello").addEventListener("click", () => {
+      if (busy) return;
+      runTurn(JSON.stringify({ text: "Say hello in one friendly sentence and confirm you can hear me on a call." }), "Say hello.");
+    });
+    document.querySelector("#clear").addEventListener("click", async () => {
+      await fetch("/clear", withGate({ method: "POST" }));
+      log.replaceChildren();
+      if (!callOn) setStatus("Ready");
+    });
+
+    watch();
+    poll();
+  </script>
+</body>
+</html>
