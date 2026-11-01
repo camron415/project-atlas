@@ -60,6 +60,7 @@
     }
     .hold.live { background: var(--hold); color: white; }
     .hold:disabled { opacity: 0.45; cursor: wait; }
+    .wide { width: 100%; margin-top: 10px; min-height: 44px; }
     details { margin-top: 14px; }
     summary { cursor: pointer; }
     form { display: flex; gap: 8px; margin-top: 12px; }
@@ -81,6 +82,7 @@
       padding: 0 16px;
       cursor: pointer;
     }
+    .ghost.on { background: var(--hold); color: white; border-color: transparent; }
     .row { display: flex; gap: 8px; margin-top: 10px; }
     .log {
       margin-top: 8px;
@@ -96,15 +98,45 @@
     .bubble.live-you p { color: var(--muted); font-style: italic; }
     .status.speaking { cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
     .meta { font-size: 13px; margin: 8px 0 0; }
+    .lock {
+      position: fixed;
+      inset: 0;
+      z-index: 40;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      padding: max(24px, env(safe-area-inset-top)) 24px max(24px, env(safe-area-inset-bottom));
+      background: #0e100c;
+      text-align: center;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-touch-callout: none;
+    }
+    .lock.on { display: flex; }
+    .lock h2 { margin: 0; font-size: 22px; font-weight: 600; }
+    .lock p { margin: 0; max-width: 26rem; color: var(--muted); }
+    .holdbar {
+      width: min(280px, 80vw);
+      height: 8px;
+      border-radius: 99px;
+      background: var(--line);
+      overflow: hidden;
+    }
+    .holdbar span { display: block; height: 100%; width: 0%; background: var(--gold); }
   </style>
 </head>
 <body>
   <main>
     <h1>Atlas</h1>
-    <p class="sub">Leave this open. A pause does not send until you sound finished. Talk over her when you want her to stop.</p>
+    <p class="sub">Leave this open, or lock the phone. The call stays up. Talk over her when you want her to stop.</p>
     <p class="status" id="status">Starting…</p>
     <div class="log" id="log"></div>
     <p class="meta" id="meta"></p>
+    <button class="ghost wide" id="mute" type="button">Mute</button>
+    <button class="ghost wide" id="pocket" type="button">Pocket lock</button>
     <button class="hold" id="call" disabled>Start call</button>
     <details>
       <summary>Type instead</summary>
@@ -118,6 +150,12 @@
       </div>
     </details>
   </main>
+  <div class="lock" id="lock">
+    <h2>Pocket lock is on</h2>
+    <p>The call keeps going. A tap will not cut her off or end the call.</p>
+    <p id="lockhint">Hold anywhere for 3 seconds to unlock.</p>
+    <div class="holdbar" aria-hidden="true"><span id="lockfill"></span></div>
+  </div>
   <script>
     const statusEl = document.querySelector("#status");
     const callBtn = document.querySelector("#call");
@@ -125,12 +163,15 @@
     const meta = document.querySelector("#meta");
     const form = document.querySelector("#typed");
     const text = document.querySelector("#text");
-    const CHECK_MS = 280;
+    const CHECK_MS = 420;
     const HOLD_MAX_MS = 3200;
-    const SPEECH_RMS = 0.035;
+    const SPEECH_RMS = 0.026;
+    const SPEECH_KEEP = 0.018;
     const BARGE_FLOOR = 0.024;
     const BARGE_MS = 300;
-    const PARTIAL_MS = 1700;
+    const PARTIAL_FIRST_MS = 400;
+    const PARTIAL_GAP_MS = 900;
+    const LOCK_MS = 3000;
     const params = new URLSearchParams(location.search);
     if (params.get("k")) localStorage.setItem("atlas-gate", params.get("k"));
     const gateKey = params.get("k") || localStorage.getItem("atlas-gate") || "";
@@ -163,9 +204,17 @@
     let liveYou = null;
     let partialBusy = false;
     let partialAt = 0;
+    let partialsSent = 0;
+    let lockHold = 0;
     let playbackFloor = 0.02;
     let clipFloor = 0.02;
     let playGen = 0;
+    let pocket = false;
+    let duplex = false;
+    let replyEl = null;
+    let nativePlay = null;
+    let nativeBroken = false;
+    let holdTimer = 0;
     const audioQueue = [];
 
     function setStatus(value) { statusEl.textContent = value; }
@@ -199,6 +248,26 @@
       if (audioCtx && audioCtx.state !== "running") audioCtx.resume().catch(() => {});
     }
 
+    function hasNative() {
+      return !nativeBroken && !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.atlas);
+    }
+
+    function tellNative(op, extra) {
+      if (!hasNative() && op !== "stop" && op !== "release") return;
+      const bridge = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.atlas;
+      if (!bridge) return;
+      bridge.postMessage(Object.assign({ op }, extra || {}));
+    }
+
+    function releaseWebMic() {
+      listening = false;
+      if (stream) stream.getTracks().forEach((track) => track.stop());
+      stream = null;
+      analyser = null;
+      if (audioCtx) audioCtx.close().catch(() => {});
+      audioCtx = null;
+    }
+
     function stopSpeaking() {
       playGen += 1;
       audioQueue.length = 0;
@@ -206,6 +275,8 @@
         try { currentSource.onended = null; currentSource.stop(); } catch { /* already stopped */ }
         currentSource = null;
       }
+      nativePlay = null;
+      tellNative("stop");
       playing = false;
     }
 
@@ -220,8 +291,12 @@
         playing = false;
         statusEl.classList.remove("speaking");
         currentSource = null;
-        if (callOn && !busy) armListen();
-        else if (!busy) setStatus(callOn ? "Listening…" : "Ready");
+        tellNative("release");
+        if (callOn && !busy) {
+          ensureMic().then(() => {
+            if (callOn && !busy && !playing) armListen();
+          }).catch(() => setStatus("Tap Start call to allow the microphone."));
+        } else if (!busy) setStatus(callOn ? "Listening…" : "Ready");
         return;
       }
       const gen = ++playGen;
@@ -232,13 +307,55 @@
       const bytes = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
       statusEl.classList.add("speaking");
-      setStatus("Speaking… tap here to interrupt");
+      setStatus(pocket ? "Speaking… hold here to interrupt" : "Speaking… talk or tap to interrupt");
       playBuffer(bytes.buffer, gen).then((finished) => {
         if (finished && gen === playGen) playNext();
       });
     }
 
+    function bytesToB64(bytes) {
+      let binary = "";
+      const step = 8192;
+      for (let i = 0; i < bytes.length; i += step) {
+        const slice = bytes.subarray(i, Math.min(i + step, bytes.length));
+        const copy = new Array(slice.length);
+        for (let j = 0; j < slice.length; j++) copy[j] = slice[j];
+        binary += String.fromCharCode.apply(null, copy);
+      }
+      return btoa(binary);
+    }
+
+    function playNative(arrayBuffer, gen) {
+      if (stream) releaseWebMic();
+      const wav = bytesToB64(new Uint8Array(arrayBuffer));
+      return new Promise((resolve) => {
+        nativePlay = { gen, resolve, bytes: arrayBuffer };
+        window.setTimeout(() => {
+          if (!nativePlay || nativePlay.gen !== gen) return;
+          tellNative("play", { wav });
+        }, 180);
+      });
+    }
+
+    window.atlasClipEnded = (why) => {
+      const pending = nativePlay;
+      if (!pending) return;
+      nativePlay = null;
+      if (why === "fail") {
+        nativeBroken = true;
+        ensureMic().then(() => playBuffer(pending.bytes, pending.gen).then(pending.resolve));
+        return;
+      }
+      if (why === "barge") {
+        pending.resolve(false);
+        if (!pocket) bargeIn();
+        return;
+      }
+      pending.resolve(pending.gen === playGen);
+    };
+
     function playBuffer(arrayBuffer, gen) {
+      if (hasNative()) return playNative(arrayBuffer, gen);
       const ctx = audioCtx;
       if (!ctx) return Promise.resolve(false);
       return ctx.decodeAudioData(arrayBuffer.slice(0)).then((buffer) => new Promise((resolve) => {
@@ -410,7 +527,7 @@
         if (token !== turnToken || !callOn) return;
         await readBody(res, token, you, reply);
       } catch (err) {
-        if (token === turnToken && err.name !== "AbortError") reply.textContent = err.message || String(err);
+        if (token === turnToken && !quietNet(err)) reply.textContent = err.message || String(err);
       } finally {
         if (token === turnToken) {
           busy = false;
@@ -430,6 +547,12 @@
       if (token) fetch("/cancel", withTurn({ method: "POST" }, token)).catch(() => {});
     }
 
+    function quietNet(err) {
+      const name = err && err.name || "";
+      const msg = String((err && err.message) || err || "");
+      return name === "AbortError" || /load failed|network|abort|cancel|disconnect/i.test(msg);
+    }
+
     function bargeIn() {
       if (!callOn) return;
       const token = liveToken;
@@ -447,10 +570,15 @@
       bargeMs = 0;
       armedForce = false;
       nextProbeAt = CHECK_MS;
-      armListen();
-      heardSpeech = true;
-      silenceMs = 0;
-      setStatus("Listening…");
+      const resume = () => {
+        if (!callOn || playing) return;
+        armListen();
+        heardSpeech = true;
+        silenceMs = 0;
+        setStatus("Listening…");
+      };
+      if (stream) resume();
+      else ensureMic().then(resume).catch(() => setStatus("Tap Start call to allow the microphone."));
     }
 
     async function considerEnd(force) {
@@ -504,7 +632,7 @@
         await readBody(res, token, you, reply);
       } catch (err) {
         probeBusy = false;
-        if (err.name === "AbortError" || token !== turnToken) return;
+        if (quietNet(err) || token !== turnToken) return;
         if (!reply) reply = addBubble("Atlas", "");
         reply.textContent = err.message || String(err);
       } finally {
@@ -592,6 +720,7 @@
       silenceMs = 0;
       lastTick = 0;
       partialAt = 0;
+      partialsSent = 0;
       liveYou = null;
       nextProbeAt = CHECK_MS;
       armedForce = false;
@@ -621,6 +750,7 @@
       const dt = lastTick ? now - lastTick : 16;
       lastTick = now;
       if (playing || busy) {
+        if (pocket) return;
         playbackFloor = playbackFloor * 0.94 + rms * 0.06;
         if (bargeSignal(rms)) {
           bargeMs += dt;
@@ -631,7 +761,8 @@
         return;
       }
       if (!listening) return;
-      if (rms > SPEECH_RMS) {
+      const speaking = rms > (heardSpeech ? SPEECH_KEEP : SPEECH_RMS);
+      if (speaking) {
         if (!heardSpeech) {
           setStatus("Hearing you…");
           if (!liveYou) liveYou = addBubble("You", "…", "live-you");
@@ -643,11 +774,18 @@
         bargeMs = 0;
         if (probeBusy) dropProbe(liveToken);
         if (!partialAt) partialAt = now;
-        else if (!partialBusy && now - partialAt >= PARTIAL_MS) {
+        const wait = partialsSent === 0 ? PARTIAL_FIRST_MS : PARTIAL_GAP_MS;
+        if (!partialBusy && now - partialAt >= wait) {
           partialAt = now;
+          partialsSent += 1;
           sendPartial();
         }
       } else if (heardSpeech) {
+        if (silenceMs === 0 && !partialBusy && (partialsSent === 0 || now - partialAt > 500)) {
+          partialAt = now;
+          partialsSent += 1;
+          sendPartial();
+        }
         silenceMs += dt;
         if (!armedForce && silenceMs >= HOLD_MAX_MS) {
           armedForce = true;
@@ -680,6 +818,15 @@
       callBtn.classList.add("live");
       callBtn.textContent = "End call";
       await holdWake();
+      if (hasNative()) {
+        duplex = true;
+        tellNative("arm");
+        return;
+      }
+      await startWebCall();
+    }
+
+    async function startWebCall() {
       await ensureMic();
       const unlock = audioCtx.createBuffer(1, 1, 22050);
       const source = audioCtx.createBufferSource();
@@ -687,16 +834,36 @@
       source.connect(audioCtx.destination);
       source.start();
       await playClip("/greeting");
-      if (callOn && !busy) armListen();
+      tellNative("release");
+      if (callOn && !busy) {
+        await ensureMic();
+        if (callOn && !busy && !playing) armListen();
+      }
+    }
+
+    function setPocket(on) {
+      pocket = on;
+      document.querySelector("#pocket").textContent = pocket ? "Pocket lock on" : "Pocket lock";
+      const lock = document.querySelector("#lock");
+      lock.classList.toggle("on", pocket);
+      document.querySelector("#lockfill").style.width = "0%";
+      document.querySelector("#lockhint").textContent = "Hold anywhere for 3 seconds to unlock.";
+      tellNative("lock", { on: pocket });
     }
 
     function endCall() {
+      if (pocket) setPocket(false);
       const token = liveToken;
       turnToken += 1;
       epoch += 1;
       callOn = false;
       busy = false;
       probeBusy = false;
+      if (duplex) {
+        duplex = false;
+        tellNative("disarm");
+      }
+      window.atlasMuted(false);
       if (abortTurn) abortTurn.abort();
       if (probeAbort) probeAbort.abort();
       fetch("/cancel", withTurn({ method: "POST" }, token)).catch(() => {});
@@ -709,9 +876,73 @@
       setStatus("Ready");
     }
 
+    statusEl.addEventListener("pointerdown", () => {
+      if (!pocket || !callOn || (!playing && !busy)) return;
+      holdTimer = window.setTimeout(() => bargeIn(), 450);
+    });
+    statusEl.addEventListener("pointerup", () => window.clearTimeout(holdTimer));
+    statusEl.addEventListener("pointerleave", () => window.clearTimeout(holdTimer));
     statusEl.addEventListener("click", () => {
+      if (pocket) return;
+      if (duplex) {
+        if (callOn) tellNative("barge");
+        return;
+      }
       if (callOn && (playing || busy)) bargeIn();
     });
+
+    const muteBtn = document.querySelector("#mute");
+    muteBtn.addEventListener("click", () => {
+      if (!callOn || !hasNative()) {
+        setStatus("Start the call, then mute.");
+        return;
+      }
+      tellNative("mute");
+    });
+    window.atlasMuted = (on) => {
+      muteBtn.textContent = on ? "Muted" : "Mute";
+      muteBtn.classList.toggle("on", !!on);
+    };
+
+    document.querySelector("#pocket").addEventListener("click", () => {
+      if (pocket) return;
+      if (!callOn) {
+        setStatus("Start the call, then pocket lock.");
+        return;
+      }
+      setPocket(true);
+    });
+
+    const lockEl = document.querySelector("#lock");
+    const lockFill = document.querySelector("#lockfill");
+    const lockHint = document.querySelector("#lockhint");
+    function beginLockHold() {
+      if (!pocket) return;
+      const started = performance.now();
+      window.clearInterval(lockHold);
+      lockHold = window.setInterval(() => {
+        const held = performance.now() - started;
+        const portion = Math.min(1, held / LOCK_MS);
+        lockFill.style.width = `${portion * 100}%`;
+        const left = Math.max(1, Math.ceil((LOCK_MS - held) / 1000));
+        lockHint.textContent = portion >= 1 ? "Unlocked" : `Keep holding… ${left}`;
+        if (held >= LOCK_MS) {
+          window.clearInterval(lockHold);
+          setPocket(false);
+        }
+      }, 50);
+    }
+    function cancelLockHold() {
+      window.clearInterval(lockHold);
+      if (!pocket) return;
+      lockFill.style.width = "0%";
+      lockHint.textContent = "Hold anywhere for 3 seconds to unlock.";
+    }
+    lockEl.addEventListener("pointerdown", beginLockHold);
+    window.addEventListener("pointerup", cancelLockHold);
+    window.addEventListener("pointercancel", cancelLockHold);
+    lockEl.addEventListener("contextmenu", (ev) => ev.preventDefault());
+    lockEl.addEventListener("touchmove", (ev) => ev.preventDefault(), { passive: false });
 
     callBtn.addEventListener("click", () => {
       if (!ready) return;
@@ -733,18 +964,61 @@
       const value = text.value.trim();
       if (!value || busy) return;
       text.value = "";
+      if (duplex) {
+        tellNative("text", { text: value });
+        return;
+      }
       runTurn(JSON.stringify({ text: value }), value);
     });
 
     document.querySelector("#hello").addEventListener("click", () => {
       if (busy) return;
+      if (duplex) {
+        tellNative("text", { text: "Say hello in one friendly sentence and confirm you can hear me on a call." });
+        return;
+      }
       runTurn(JSON.stringify({ text: "Say hello in one friendly sentence and confirm you can hear me on a call." }), "Say hello.");
     });
     document.querySelector("#clear").addEventListener("click", async () => {
       await fetch("/clear", withGate({ method: "POST" }));
       log.replaceChildren();
+      replyEl = null;
+      liveYou = null;
       if (!callOn) setStatus("Ready");
     });
+
+    window.atlasStatus = (text) => setStatus(text);
+    window.atlasPhase = (phase) => {
+      playing = phase === "speaking";
+      busy = phase === "thinking" || phase === "speaking";
+      statusEl.classList.toggle("speaking", busy);
+    };
+    window.atlasYou = (text, live) => {
+      if (!liveYou) liveYou = addBubble("You", text, live ? "live-you" : "");
+      else liveYou.textContent = text;
+      liveYou.closest(".bubble")?.classList.toggle("live-you", !!live);
+      if (!live) liveYou = null;
+    };
+    window.atlasReply = (text, mode) => {
+      if (mode === "open" || !replyEl) replyEl = addBubble("Atlas", "");
+      if (mode === "add" && replyEl) replyEl.textContent += text;
+      else if (mode === "close" && replyEl) {
+        if (text) replyEl.textContent = text;
+        replyEl = null;
+      } else if (replyEl) replyEl.textContent = text;
+    };
+    window.atlasRestart = () => { if (replyEl) replyEl.textContent = ""; };
+    window.atlasMeta = (text) => { meta.textContent = text; };
+    window.atlasFail = () => {
+      duplex = false;
+      if (!callOn) return;
+      startWebCall().catch((err) => {
+        callOn = false;
+        callBtn.classList.remove("live");
+        callBtn.textContent = "Start call";
+        setStatus(err.message || "Tap Start call to allow the microphone.");
+      });
+    };
 
     watch();
     poll();

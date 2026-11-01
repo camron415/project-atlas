@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		A10000000000000000000007 /* AtlasApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000004 /* AtlasApp.swift */; };
 		A10000000000000000000008 /* CallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000005 /* CallView.swift */; };
+		A10000000000000000000023 /* CallLoop.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000022 /* CallLoop.swift */; };
 		A10000000000000000000009 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000006 /* Assets.xcassets */; };
 		A10000000000000000000020 /* call-url.local in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000021 /* call-url.local */; };
 /* End PBXBuildFile section */
@@ -17,6 +18,7 @@
 		A10000000000000000000003 /* AtlasVoice.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AtlasVoice.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000004 /* AtlasApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AtlasApp.swift; sourceTree = "<group>"; };
 		A10000000000000000000005 /* CallView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallView.swift; sourceTree = "<group>"; };
+		A10000000000000000000022 /* CallLoop.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallLoop.swift; sourceTree = "<group>"; };
 		A10000000000000000000006 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A10000000000000000000021 /* call-url.local */ = {isa = PBXFileReference; lastKnownFileType = text; path = "call-url.local"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -37,6 +39,7 @@
 			children = (
 				A10000000000000000000004 /* AtlasApp.swift */,
 				A10000000000000000000005 /* CallView.swift */,
+				A10000000000000000000022 /* CallLoop.swift */,
 				A10000000000000000000021 /* call-url.local */,
 				A10000000000000000000006 /* Assets.xcassets */,
 			);
@@ -130,6 +133,7 @@
 			files = (
 				A10000000000000000000007 /* AtlasApp.swift in Sources */,
 				A10000000000000000000008 /* CallView.swift in Sources */,
+				A10000000000000000000023 /* CallLoop.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -183,6 +187,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Atlas;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				INFOPLIST_FILE = AtlasVoice/Info.plist;
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Atlas uses the microphone for the call.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -216,6 +221,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Atlas;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				INFOPLIST_FILE = AtlasVoice/Info.plist;
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Atlas uses the microphone for the call.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

@@ -26,6 +26,7 @@ from pathlib import Path
 import numpy as np
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from starlette.requests import ClientDisconnect
 
 HERE = Path(__file__).resolve().parent
 ATLAS_ENV = HERE.parent / ".env"
@@ -86,7 +87,13 @@ async def phone_gate(request: Request, call_next):
         )
         return Response(page, media_type="text/html", status_code=401)
     return JSONResponse({"error": "Locked."}, status_code=401)
+
+
+@app.exception_handler(ClientDisconnect)
+async def phone_hung_up(_request: Request, _exc: ClientDisconnect):
+    return Response(status_code=204)
 mlx_jobs: queue.Queue = queue.Queue()
+mlx_active = False
 history: list[dict[str, str]] = []
 models: dict[str, object] = {
     "stt": None,
@@ -119,6 +126,47 @@ def snapshot() -> str:
     return clip.strip()
 
 
+REPO = NOW_PATH.parents[1]
+PACK = REPO / "atlas-personal-context"
+CHAT_INDEX = REPO / "archive/chats/INDEX.md"
+STORY_PATH = PACK / "career-planning-roadmap/career-dashboard-docs/MY_STORY.md"
+LIFE_PATH = PACK / "our-story-journey/CONTENT.md"
+
+
+def read_clip(path: Path, limit: int, start: str = "", end: str = "") -> str:
+    if not path.exists():
+        return ""
+    text = path.read_text(errors="replace")
+    if start:
+        at = text.find(start)
+        if at >= 0:
+            text = text[at:]
+    if end:
+        stop = text.find(end)
+        if stop > 0:
+            text = text[:stop]
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    return text[:limit].strip()
+
+
+def recent_chats(n: int) -> str:
+    if not CHAT_INDEX.exists():
+        return "No closed-chat summaries are on this Mac yet."
+    rows = []
+    for line in CHAT_INDEX.read_text(errors="replace").splitlines():
+        if not line.startswith("| 20"):
+            continue
+        parts = [part.strip() for part in line.strip().strip("|").split("|")]
+        if len(parts) < 5:
+            continue
+        date, _chat_id, title, status, gist = parts[:5]
+        gist = re.sub(r"`+", "", re.sub(r"\s+", " ", gist))[:170]
+        rows.append(f"{date} — {title} ({status}). {gist}")
+    if not rows:
+        return "No closed-chat summaries are on this Mac yet."
+    return "\n".join(rows[-n:])
+
+
 HARD = re.compile(r"\b(think (it |this )?through|reason (about|through)|in detail|step by step)\b", re.I)
 CALL_LOG = Path.home() / "Library/Application Support/Atlas/calls.jsonl"
 TURN_MODEL = Path.home() / "Library/Application Support/Atlas/models/smart-turn-v3.2-cpu.onnx"
@@ -133,7 +181,7 @@ def system_prompt(user_text: str) -> str:
     today = time.strftime("%A, %B %-d, %Y", time.localtime())
     prompt = f"""You are Atlas, talking with Camron out loud.
 Friendly and natural. Do not call him sir.
-You can hear him. Today is {today} in Denver.
+You can hear him. Today is {today}, Mountain time.
 Match your length to the question. A small question gets one or two sentences. A decision, a plan, or an explanation can run four to six sentences, then one short question if you need something from him. Do not monologue.
 You can search the web. Use it for facts, numbers, news, weather, prices, and anything you are not sure about. If he asks you to look something up, look it up. Say only the final answer.
 Say it the way you would on a phone call. No markdown, no lists, no links, no brackets, no citation numbers, no URLs, and no source names.
@@ -142,10 +190,21 @@ You do not see his latest commits. These notes are the background, not a live re
 
 Background:
 Camron is building Halo, a learning app, in the vocalLearn repo. The live work is the learning loop: ask about something, harvest the facts onto Keep, and review them. GitHub issues will later carry one role, a priority from P0 to P3, and an autonomy of ask, plan, or go. Low-autonomy work waits for his yes or no.
-This call is Atlas, the voice in front of that. Ears and mouth run on his Mac. Judgment is Grok 4.3 through the xAI API, not a local model. The phone reaches the Mac over Tailscale. The phone is for talking and, later, for a yes or no when an agent is stuck. Orchestration of Cursor agents comes after the learning loop is worth opening. He lives in Denver.
+This call is Atlas, the voice in front of that. Ears and mouth run on his Mac. Judgment is Grok 4.3 through the xAI API, not a local model. The phone reaches the Mac over Tailscale. The phone is for talking and, later, for a yes or no when an agent is stuck. Orchestration of Cursor agents comes after the learning loop is worth opening. He and Camila live in Salt Lake City.
+
+Who he is, from his own notes. Say it in your own words. Never recite identification numbers, document numbers, or street addresses.
+{read_clip(STORY_PATH, 2200, "## 60-second", "## STAR")}
+
+His life with Camila. Camila's immigration paperwork is in the same private notes. Do not read those numbers aloud.
+{read_clip(LIFE_PATH, 2600, "## Names", "## Raw transcript")}
+
+Closed Cursor chats, newest last. Each line is a date and a short summary. Use them when he asks what you were working on or where a conversation left off. A chat that was never written down is not here.
+{recent_chats(24 if re.search(r"\b(chat|chats|left off|yesterday|last time|remember|where were we|pick up|archive)\b", user_text, re.I) else 12)}
 """
     if re.search(r"\b(work on|halo|ticket|vocallearn|harvest|atlas|repo|agent)\b", user_text, re.I):
         prompt += "\nHe asked about the current work. Use these notes if they answer it:\n" + snapshot()[:900]
+    if re.search(r"\b(job|jobs|career|resume|interview|hire|hiring|compass|flores)\b", user_text, re.I):
+        prompt += "\nInterview and work-history notes:\n" + read_clip(STORY_PATH, 1600, "## STAR", "## Framing")
     return prompt
 
 
@@ -577,10 +636,14 @@ def warm() -> None:
         return
     while True:
         fn, done = mlx_jobs.get()
+        global mlx_active
+        mlx_active = True
         try:
             done.put((True, fn()))
         except Exception as err:
             done.put((False, err))
+        finally:
+            mlx_active = False
 
 
 @app.on_event("startup")
@@ -667,6 +730,8 @@ async def hear(request: Request):
         print(f"hear skipped: {err}", flush=True)
         return JSONResponse({"text": ""})
     try:
+        if mlx_active or not mlx_jobs.empty():
+            return JSONResponse({"text": "", "busy": True})
         text = await asyncio.to_thread(lambda: on_mlx(lambda: transcribe_impl(wav_path)))
         return JSONResponse({"text": text})
     finally:
@@ -710,6 +775,7 @@ async def turn(request: Request):
                 print(f"endpoint failed, sending the turn: {err}", flush=True)
                 complete, probability = True, 1.0
             if not complete:
+                print(f"probe hold p={probability:.2f}", flush=True)
                 if os.path.exists(wav_path):
                     os.unlink(wav_path)
                 return JSONResponse({"complete": False, "probability": round(probability, 3)})
@@ -723,8 +789,10 @@ async def turn(request: Request):
                 return
             if wav_path:
                 yield sse("status", {"stage": "hearing", "detail": "Hearing you…"})
+                heard_at = time.perf_counter()
                 user_text = on_mlx(lambda: transcribe_impl(wav_path))
                 timing["stt_ms"] = int((time.perf_counter() - started) * 1000)
+                timing["asr_ms"] = int((time.perf_counter() - heard_at) * 1000)
                 yield sse("transcript", {"text": user_text})
             if turn_stopped(turn_id):
                 return
@@ -818,11 +886,16 @@ async def turn(request: Request):
             yield sse("done", {"text": final, "timing": timing})
             heard = " ".join(user_text.split())
             said = " ".join(final.split())
+            clip_s = 0.0
+            if wav_path and os.path.exists(wav_path):
+                clip_s = max(0, os.path.getsize(wav_path) - 44) / 32000
             record_turn(heard, said, timing, spoken_hold)
             print(
                 "turn"
                 f" search={int(spoken_hold)}"
                 f" stt={timing['stt_ms']}ms"
+                f" asr={timing.get('asr_ms', 0)}ms"
+                f" clip={clip_s:.1f}s"
                 f" token={timing['first_token_ms']}ms"
                 f" audio={timing['first_audio_ms']}ms"
                 f" heard={heard[:240]!r}"
