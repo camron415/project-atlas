@@ -3,7 +3,7 @@
  * Run the morning inbox brief (analyst scan → inbox/YYYY-MM-DD-morning.md).
  * Usage: npm run morning-brief [-- --force] [-- atlas,vocallearn]
  */
-import "dotenv/config";
+import "../load-env.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { getDb } from "../db/schema.js";

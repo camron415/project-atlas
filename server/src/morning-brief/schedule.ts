@@ -7,13 +7,13 @@ import {
 } from "./run.js";
 
 function morningBriefHour(): number {
-  const raw = Number(process.env.ATLAS_MORNING_BRIEF_HOUR ?? 7);
-  return Number.isFinite(raw) ? Math.min(23, Math.max(0, raw)) : 7;
+  const raw = Number(process.env.ATLAS_MORNING_BRIEF_HOUR ?? 5);
+  return Number.isFinite(raw) ? Math.min(23, Math.max(0, raw)) : 5;
 }
 
 function morningBriefMinute(): number {
-  const raw = Number(process.env.ATLAS_MORNING_BRIEF_MINUTE ?? 0);
-  return Number.isFinite(raw) ? Math.min(59, Math.max(0, raw)) : 0;
+  const raw = Number(process.env.ATLAS_MORNING_BRIEF_MINUTE ?? 50);
+  return Number.isFinite(raw) ? Math.min(59, Math.max(0, raw)) : 50;
 }
 
 function localDateKey(date = new Date()): string {

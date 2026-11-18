@@ -51,13 +51,14 @@ Cheap road mode: Grok STT → `/voice/plan-turn` → server TTS. See `docs/VOICE
 
 **Kickoff:** `docs/PHASE_2_KICKOFF.md` (research + execution waves)
 
-- [x] Wave 0 — cost ledger, provider interface, launchd 24/7
-- [x] Wave 1 — VocalLearn manager + daily inbox
-- [ ] Wave 2 — morning brief expansion + Mac notifications
+- [x] Wave 0 — cost ledger, provider interface, launchd 24/7 (LaunchAgent installed 2026-08-13; Node Full Disk Access required)
+- [x] Wave 1 — VocalLearn manager + daily inbox (Sloane)
+- [ ] Wave 2 — morning brief expansion + Mac notifications (brief exists; notifications still open)
 - [ ] Wave 3 — broke alerts (tests / CI)
-- [ ] Wave 4 — Career manager
+- [x] Wave 4 — Career manager (Ellis: ingest, apply report, applied/closed/focus, packets)
 - [ ] Wave 5 — scale, iPhone push, optional briefing Realtime
 - [ ] Adaptive model router (multi-provider for text tasks)
+- [x] Phone-callable Grok agent + Collection snapshot (primary daily interface as of July 2026)
 
 ## Phase 3 — Autonomous workers
 

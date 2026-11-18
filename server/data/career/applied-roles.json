@@ -1,0 +1,146 @@
+{
+  "updatedAt": "2026-09-01T03:04:19.610Z",
+  "roles": [
+    {
+      "id": "applied-mti32tndgl84",
+      "company": "Corgi Insurance",
+      "role": "Full Stack Software Engineer",
+      "appliedAt": "2026-09-01T03:04:19.609Z",
+      "source": "cli"
+    },
+    {
+      "id": "applied-mti32tdpf8ag",
+      "company": "PLACE",
+      "role": "Front End Engineer (Mobile)",
+      "appliedAt": "2026-09-01T03:04:19.261Z",
+      "source": "cli"
+    },
+    {
+      "id": "applied-mti32t2pykux",
+      "company": "Waymark",
+      "role": "Junior Software Engineer",
+      "appliedAt": "2026-09-01T03:04:18.865Z",
+      "source": "cli"
+    },
+    {
+      "id": "applied-mstfh43je956",
+      "company": "iFIT",
+      "role": "Junior Salesforce AI Engineer",
+      "appliedAt": "2026-08-14T12:00:00.000Z",
+      "notes": "Logan commute/hybrid; asked ~$65k; Salesforce not required",
+      "source": "cli"
+    },
+    {
+      "id": "applied-mste4t0lstbl",
+      "company": "WGU",
+      "role": "Associate Learning Systems Engineer",
+      "appliedAt": "2026-08-13T12:00:00.000Z",
+      "notes": "SLC 5 days in-office; asked ~$68k; packet 2026-08-13/01-wgu",
+      "source": "cli"
+    },
+    {
+      "id": "applied-jul23-twobarrels",
+      "company": "Two Barrels",
+      "role": "Front-End Web Developer",
+      "appliedAt": "2026-07-23T12:00:00.000Z",
+      "notes": "Jul 23 — Two Barrels / Corporate Tools front-end posting",
+      "source": "manual"
+    },
+    {
+      "id": "applied-jul23-corporatetools-fe",
+      "company": "Corporate Tools",
+      "role": "Front-End Web Developer",
+      "appliedAt": "2026-07-23T12:00:00.000Z",
+      "notes": "Same Jul 23 batch as Two Barrels front-end",
+      "source": "manual"
+    },
+    {
+      "id": "applied-jul30-dakcs",
+      "company": "DAKCS / PDCflow",
+      "role": "Junior Software Engineer",
+      "appliedAt": "2026-07-30T12:00:00.000Z",
+      "source": "manual"
+    },
+    {
+      "id": "applied-jul30-rumor",
+      "company": "RUMOR Advertising",
+      "role": "Junior Web Developer",
+      "appliedAt": "2026-07-30T12:00:00.000Z",
+      "source": "manual"
+    },
+    {
+      "id": "applied-jul30-utahcourts",
+      "company": "Utah Courts",
+      "role": "Application Developer",
+      "appliedAt": "2026-07-30T12:00:00.000Z",
+      "source": "manual"
+    },
+    {
+      "id": "applied-jul30-traeger",
+      "company": "Traeger",
+      "role": "Engineering role (week of Jul 30)",
+      "appliedAt": "2026-07-30T12:00:00.000Z",
+      "source": "manual"
+    },
+    {
+      "id": "applied-jul30-3form",
+      "company": "3form",
+      "role": "Jr. Full Stack Web Developer",
+      "appliedAt": "2026-07-30T12:00:00.000Z",
+      "source": "manual"
+    },
+    {
+      "id": "applied-aug10-reef",
+      "company": "Reef Capital Partners",
+      "role": "Full Stack Web Developer (Front End Focused)",
+      "appliedAt": "2026-08-10T12:00:00.000Z",
+      "source": "manual"
+    },
+    {
+      "id": "applied-aug10-corporatetools-jse",
+      "company": "Corporate Tools",
+      "role": "Junior Software Engineer",
+      "appliedAt": "2026-08-10T12:00:00.000Z",
+      "notes": "Different role than the Jul 23 front-end apply",
+      "source": "manual"
+    },
+    {
+      "id": "applied-aug10-utahspromise",
+      "company": "Utah's Promise",
+      "role": "WordPress Front-End Developer",
+      "appliedAt": "2026-08-10T12:00:00.000Z",
+      "source": "manual",
+      "notes": "REJECTED Aug 14 — Elle Bowlby / People Ops. First clear outcome in this batch."
+    },
+    {
+      "id": "applied-aug10-hydrojug",
+      "company": "HydroJug",
+      "role": "Software Engineer (Operations)",
+      "appliedAt": "2026-08-10T12:00:00.000Z",
+      "source": "manual"
+    },
+    {
+      "id": "applied-aug10-dmba",
+      "company": "DMBA",
+      "role": "Junior Software Engineer (Appian) / SE I Low-Code",
+      "appliedAt": "2026-08-10T12:00:00.000Z",
+      "source": "manual"
+    },
+    {
+      "id": "applied-aug10-cgi",
+      "company": "CGI",
+      "role": "Junior AI Engineer",
+      "appliedAt": "2026-08-10T12:00:00.000Z",
+      "source": "manual",
+      "notes": "Recruiter Tatya Dave @ njoyn.com; RAG no, custom agents yes, MCP no, Docker limited, salary $85-100k"
+    },
+    {
+      "id": "applied-mrydwysf",
+      "company": "Atlas Tool Wiring Test Co",
+      "role": "Smoke test — ignore",
+      "appliedAt": "2026-07-24T03:32:36.255Z",
+      "notes": "connectivity test 2026-07-23",
+      "source": "phone-agent"
+    }
+  ]
+}

@@ -14,4 +14,7 @@ if [[ -f "${ENV_FILE}" ]]; then
 fi
 
 cd "${ROOT}/server"
-exec npx tsx src/index.ts
+# Give launchd a beat after crash/restart so tsx's ESM loader doesn't hit EDEADLK.
+sleep 2
+ulimit -n 10240 2>/dev/null || true
+exec node ./node_modules/tsx/dist/cli.mjs src/index.ts

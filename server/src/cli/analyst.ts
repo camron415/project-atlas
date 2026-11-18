@@ -3,7 +3,7 @@
  * Run a read-only analyst review from the CLI.
  * Usage: npm run analyst -- atlas "architecture and risks"
  */
-import "dotenv/config";
+import "../load-env.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { getDb } from "../db/schema.js";

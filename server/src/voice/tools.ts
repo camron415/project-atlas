@@ -216,7 +216,7 @@ export async function executeVoiceTool(
         snippet: h.snippet,
       })),
       instruction: hits.length
-        ? "Answer from these snippets; cite source paths when helpful."
+        ? "Prefer dated inbox from this week over HANDOFF.md / ROADMAP.md. Those are historical."
         : "No cached hits. If this is not purely about repo code, call web_lookup next with a specific query before answering.",
     });
   }

@@ -1,6 +1,18 @@
 # Atlas — Week Status
 
-**Phase 1.5 closed** (2026-06-10). **Phase 1.75** starting.
+**Updated:** 2026-08-14. Historical Phase 1.5/1.75 checklist below is archived context.
+
+## Current (Aug 14)
+
+- **Interface:** phone-callable Grok agent (Collection + Mac tools). iOS app is secondary (7-day free signing).
+- **Mac:** LaunchAgent `com.atlas.server` on 8787; Funnel live. Do not also run `npm run dev`.
+- **Overnight:** 5:50 Atlas brief · 6:00 Sloane + Ellis · 6:20 phone brief → Collection.
+- **Career speak queue:** WGU → staffing (ConsultNet / TEKsystems / Robert Half) → iFIT (Logan stretch).
+- **Sync:** Cursor / phone / managers dump through `POST /agent/session_close` (hooks + phone tools + 6:00 manager closeout). `GET /agent/where_we_left_off` + `/health.loop` show freshness.
+
+## Phase 1.5 closed
+
+**Phase 1.5 closed** (2026-06-10). **Phase 1.75** complete in docs; Phase 2 managers in progress (see `docs/ROADMAP.md`).
 
 ## Current build
 

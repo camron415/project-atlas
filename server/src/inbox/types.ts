@@ -8,6 +8,8 @@ export interface InboxWriteRequest {
   body: string;
   sessionId?: string;
   analystJobId?: string;
+  /** Replace today's file instead of writing a timestamped sibling. */
+  overwrite?: boolean;
 }
 
 export interface InboxWriteResult {

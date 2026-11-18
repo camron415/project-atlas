@@ -3,7 +3,10 @@ import SwiftUI
 @main
 struct AtlasApp: App {
     @Environment(\.scenePhase) private var scenePhase
-    init() { CallAudio.start() }
+    init() {
+        CallPrefs.applyPlusDefaultForRoadTest()
+        CallAudio.start()
+    }
 
     var body: some Scene {
         WindowGroup {

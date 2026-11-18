@@ -21,3 +21,5 @@ inbox/
 # Phone voice gate. Copy call-url.example to call-url.local.
 ios/AtlasVoice/call-url.local
 server/voice-local/__pycache__/
+**/__pycache__/
+*.pyc

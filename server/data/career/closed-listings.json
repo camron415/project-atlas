@@ -1,0 +1,76 @@
+{
+  "updatedAt": "2026-08-14T20:19:37.559Z",
+  "listings": [
+    {
+      "id": "closed-mste4w5zgdyi",
+      "company": "CaseWorthy",
+      "role": "Software Engineer I",
+      "reason": "apply page dead",
+      "closedAt": "2026-08-10",
+      "source": "cli"
+    },
+    {
+      "id": "closed-mste4vbv43y7",
+      "company": "WGU",
+      "role": "Software Engineer I Full-Stack",
+      "reason": "LinkedIn closed; different from Associate Learning Systems apply",
+      "closedAt": "2026-08-10",
+      "url": "https://www.linkedin.com/jobs/view/",
+      "source": "cli"
+    },
+    {
+      "id": "closed-mste4ulu2szq",
+      "company": "Fashionphile",
+      "role": "Junior Software Engineer",
+      "reason": "listing closed before packet",
+      "closedAt": "2026-08-13",
+      "url": "https://www.linkedin.com/jobs/view/4449079887/",
+      "source": "cli"
+    },
+    {
+      "id": "closed-dx-atlassian",
+      "company": "DX (Atlassian)",
+      "role": "Junior Software Engineer",
+      "reason": "no longer accepting applications",
+      "closedAt": "2026-08-13",
+      "url": "https://jobs.digitalhire.com/job-listing/opening/5zXMlGEM5pnn4OYe7V1vF8",
+      "source": "manual"
+    },
+    {
+      "id": "closed-lvt-jse",
+      "company": "LVT",
+      "role": "Junior Software Engineer",
+      "reason": "no longer accepting applications",
+      "closedAt": "2026-08-13",
+      "url": "https://www.indeed.com/viewjob?jk=e3b5b7555781c78b",
+      "source": "manual"
+    },
+    {
+      "id": "closed-summit-thread",
+      "company": "Summit Thread",
+      "role": "Junior Full-Stack Developer",
+      "reason": "no longer accepting applications",
+      "closedAt": "2026-08-13",
+      "url": "https://boards.greenhouse.io/summitthread/jobs/junior-full-stack",
+      "source": "manual"
+    },
+    {
+      "id": "closed-jobnimbus-se2",
+      "company": "JobNimbus",
+      "role": "Software Engineer II",
+      "reason": "no longer accepting applications",
+      "closedAt": "2026-08-13",
+      "url": "https://job-boards.greenhouse.io/jobnimbus/jobs/4323495009",
+      "source": "manual"
+    },
+    {
+      "id": "closed-compass-jfe",
+      "company": "Compass Insurance Advisors",
+      "role": "Junior Frontend Developer",
+      "reason": "no longer accepting applications",
+      "closedAt": "2026-08-13",
+      "url": "https://www.indeed.com/viewjob?jk=e927c0ad53aa8d9f",
+      "source": "manual"
+    }
+  ]
+}

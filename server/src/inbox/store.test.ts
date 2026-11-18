@@ -31,5 +31,36 @@ if (slugifyInboxTitle("Hello World!!!") !== "hello-world") {
   throw new Error("slugify failed");
 }
 
+const standup1 = writeInboxArtifact(registry, {
+  project: "atlas",
+  title: "Standup prep",
+  body: "first standup body",
+});
+const standup2 = writeInboxArtifact(registry, {
+  project: "atlas",
+  title: "Standup prep",
+  body: "second standup body",
+});
+if (standup1.path !== standup2.path) {
+  throw new Error("standup-prep should overwrite the canonical daily file");
+}
+if (!fs.readFileSync(standup2.path, "utf8").includes("second standup body")) {
+  throw new Error("standup-prep overwrite did not land");
+}
+
+const latest1 = writeInboxArtifact(registry, {
+  project: "atlas",
+  title: "LATEST",
+  body: "first latest",
+});
+const latest2 = writeInboxArtifact(registry, {
+  project: "atlas",
+  title: "LATEST",
+  body: "second latest",
+});
+if (latest1.path !== latest2.path) {
+  throw new Error("latest should overwrite the canonical daily file");
+}
+
 fs.rmSync(tmpRoot, { recursive: true, force: true });
 console.log("inbox store tests passed");

@@ -1,0 +1,24 @@
+---
+description: End-of-session phone knowledge sync for Atlas/VocalLearn/Career
+alwaysApply: true
+---
+
+# Phone agent knowledge sync
+
+Overnight managers and the Grok phone agent **cannot see Cursor chats**. They only see git, roadmaps, inbox files, and the xAI Collection snapshot.
+
+At the **start** of a session, treat `GET http://127.0.0.1:8787/agent/where_we_left_off` (Bearer `ATLAS_AGENT_TOKEN` from `atlas/server/.env`) as source of truth for last night's managers and phone call. Do not assume overnight work never happened. Do not treat VocalLearn `HANDOFF.md` / `ROADMAP.md` as current Halo work — prefer this week's inbox and `00-LATEST.md`.
+
+When Camron wraps a session, ships work, or says things like "sync for phone", "update the collection", "close out", or "we're done for now":
+
+1. Update the relevant `HANDOFF.md` / `ROADMAP.md` / inbox note if anything material changed.
+2. Prefer committing (and pushing when he wants) so overnight git scans see the work.
+3. Run:
+
+```bash
+cd server && npm run refresh-phone-knowledge -- --note "<short plain-English summary of what changed and what's next>"
+```
+
+Or `POST /agent/session_close` with the same note.
+
+Do not claim the phone agent is up to date until that command succeeds (or he explicitly skips sync).

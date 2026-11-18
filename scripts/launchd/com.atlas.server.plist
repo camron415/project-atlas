@@ -6,23 +6,47 @@
   <string>com.atlas.server</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/bin/bash</string>
-    <string>REPO_ROOT/scripts/atlas-server.sh</string>
+    <string>NODE_BIN</string>
+    <string>REPO_ROOT/server/node_modules/tsx/dist/cli.mjs</string>
+    <string>REPO_ROOT/server/src/index.ts</string>
   </array>
   <key>WorkingDirectory</key>
-  <string>REPO_ROOT</string>
+  <string>REPO_ROOT/server</string>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
   <true/>
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+  <key>SoftResourceLimits</key>
+  <dict>
+    <key>NumberOfFiles</key>
+    <integer>10240</integer>
+  </dict>
+  <key>ProcessType</key>
+  <string>Interactive</string>
+  <key>LimitLoadToSessionType</key>
+  <string>Aqua</string>
   <key>StandardOutPath</key>
-  <string>REPO_ROOT/server/data/launchd-stdout.log</string>
+  <string>USER_HOME/Library/Logs/com.atlas.server.stdout.log</string>
   <key>StandardErrorPath</key>
-  <string>REPO_ROOT/server/data/launchd-stderr.log</string>
+  <string>USER_HOME/Library/Logs/com.atlas.server.stderr.log</string>
   <key>EnvironmentVariables</key>
   <dict>
+    <key>HOME</key>
+    <string>USER_HOME</string>
+    <key>USER</key>
+    <string>USER_NAME</string>
+    <key>LOGNAME</key>
+    <string>USER_NAME</string>
     <key>PATH</key>
     <string>/opt/homebrew/opt/node@22/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>DOTENV_CONFIG_PATH</key>
+    <string>REPO_ROOT/server/.env</string>
+    <key>ATLAS_DATA_DIR</key>
+    <string>REPO_ROOT/server/data</string>
+    <key>ATLAS_REGISTRY_PATH</key>
+    <string>REPO_ROOT/projects.registry.json</string>
   </dict>
 </dict>
 </plist>

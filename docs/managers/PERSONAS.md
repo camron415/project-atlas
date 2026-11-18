@@ -7,7 +7,7 @@ Professional, direct, first-name basis. Chief **Atlas** moderates; managers are 
 
 | Project | Name | Title | Voice (v2) | Model (v1 → v3) |
 |---------|------|-------|------------|-----------------|
-| **VocalLearn** | **Sloane** | VocalLearn Lead | `ara` (planned) | xAI fast → optional Gemini second opinion |
+| **VocalLearn** | **Sloane** | Halo / VocalLearn lead (family Ask first) | `ara` (planned) | xAI fast → optional Gemini second opinion |
 | **Career** | **Ellis** | Career Lead | `leo` (planned) | xAI fast → optional Haiku |
 | **Atlas (meta)** | **Reed** | Platform Lead | `sal` (planned) | xAI fast |
 

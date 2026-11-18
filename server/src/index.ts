@@ -1,4 +1,4 @@
-import "dotenv/config";
+import "./load-env.js";
 import express from "express";
 import http from "node:http";
 import fs from "node:fs";
@@ -57,6 +57,13 @@ import { enqueueAnalystJob } from "./analyst/run.js";
 import { getAnalystJob } from "./analyst/store.js";
 import { startMorningBriefScheduler, getMorningBriefSchedulerStatus } from "./morning-brief/schedule.js";
 import { startManagerScheduler, getManagerSchedulerStatus } from "./managers/schedule.js";
+import {
+  startPhoneBriefScheduler,
+  getPhoneBriefSchedulerStatus,
+} from "./phone-brief/schedule.js";
+import { markRoleApplied, listAppliedRoles } from "./career/applied-roles.js";
+import { generateCareerPacket } from "./career/generate-packet.js";
+import { findRegistryProject } from "./managers/projects.js";
 import { resolveLanIp } from "./network/lan-ip.js";
 import { initCostLedger, getCostMtdSnapshot, getCostMonthSummary } from "./cost/ledger.js";
 import { getStandupStatus } from "./standup/status.js";
@@ -65,6 +72,16 @@ import { writeStandupDecisions } from "./standup/decisions.js";
 import { refreshStandupContextIndex } from "./standup/fts-refresh.js";
 import { listStandupPreps } from "./standup/context.js";
 import { standupAgendaFilenameForToday } from "./standup/filenames.js";
+import { requireAgentToken } from "./agent/auth.js";
+import { agentSearchContext } from "./agent/search-context.js";
+import {
+  enqueueCloseSessionLoop,
+  inferProjectFromWorkspace,
+  loopCloseIsStale,
+  readLoopCloseStamp,
+  type LoopNoteSource,
+} from "./agent/loop-close.js";
+import { buildWhereWeLeftOff } from "./agent/where-we-left-off.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dataDir =
@@ -81,6 +98,42 @@ const db = getDb(dataDir);
 initCostLedger(db);
 const registry = loadRegistry();
 const analystDeps = { db, registry, dataDir };
+const atlasRoot = path.resolve(__dirname, "../..");
+
+function parseLoopSource(raw: unknown): LoopNoteSource {
+  if (raw === "phone" || raw === "manager" || raw === "session-end") return raw;
+  return "cursor";
+}
+
+function startLoopClose(input: {
+  source: LoopNoteSource;
+  note?: string;
+  project?: InboxProjectSlug;
+  workspacePath?: string;
+  skipSync?: boolean;
+}): void {
+  void enqueueCloseSessionLoop({
+    atlasRoot,
+    dataDir,
+    db,
+    registry,
+    source: input.source,
+    note: input.note,
+    project: input.project,
+    workspacePath: input.workspacePath,
+    skipSync: input.skipSync,
+  }).then((result) => {
+    if (!result.ok) {
+      console.warn("[loop-close]", result.errors.join("; ") || "closeout failed");
+      return;
+    }
+    console.log(
+      `[loop-close] ${input.source} dump ok collection=${String(result.stamp.collectionOk)}`,
+    );
+  }).catch((error) => {
+    console.warn("[loop-close]", error instanceof Error ? error.message : error);
+  });
+}
 
 void import("./context/search.js").then(({ rebuildContextIndex }) => {
   try {
@@ -99,18 +152,264 @@ const slog = (...args: unknown[]): void => {
 
 const app = express();
 app.use(express.json({ limit: "2mb" }));
+app.use((err: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (/error -11|EDEADLK|deadlock/i.test(msg)) {
+    res.status(503).json({ ok: false, error: "mac_busy", message: "Retry in a moment." });
+    return;
+  }
+  if (
+    err instanceof SyntaxError ||
+    (typeof err === "object" && err !== null && "type" in err && (err as { type?: string }).type === "entity.parse.failed")
+  ) {
+    res.status(400).json({ ok: false, error: "invalid_json" });
+    return;
+  }
+  next(err);
+});
 app.use((_req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
   next();
 });
 app.options(/.*/, (_req, res) => {
   res.sendStatus(204);
 });
 
+app.use("/agent", (req, _res, next) => {
+  const keys = req.body && typeof req.body === "object" ? Object.keys(req.body).join(",") : "";
+  console.log(`[agent] ${req.method} ${req.path} keys=${keys || "(empty)"}`);
+  next();
+});
+
+/** Phone / external voice agents — live Mac context (Bearer ATLAS_AGENT_TOKEN). */
+app.post("/agent/search_context", requireAgentToken, (req, res) => {
+  try {
+    const query =
+      typeof req.body?.query === "string" ? req.body.query.trim() : "";
+    if (!query) {
+      res.status(400).json({ ok: false, error: "query_required" });
+      return;
+    }
+    const limit =
+      typeof req.body?.limit === "number" ? req.body.limit : undefined;
+    res.json(agentSearchContext(db, registry, query, limit, { atlasRoot, dataDir }));
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
+
+app.post("/agent/mark_applied", requireAgentToken, (req, res) => {
+  try {
+    const company =
+      typeof req.body?.company === "string" ? req.body.company.trim() : "";
+    if (!company) {
+      res.status(400).json({ ok: false, error: "company_required" });
+      return;
+    }
+    const entry = markRoleApplied(dataDir, {
+      company,
+      role: typeof req.body?.role === "string" ? req.body.role : undefined,
+      notes: typeof req.body?.notes === "string" ? req.body.notes : undefined,
+      source: "phone-agent",
+    });
+    res.json({ ok: true, entry, applied: listAppliedRoles(dataDir) });
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
+
+/** Generate resume + cover letter packet for a company/role (career-dashboard). */
+app.post("/agent/generate_packet", requireAgentToken, (req, res) => {
+  try {
+    const company =
+      typeof req.body?.company === "string" ? req.body.company.trim() : "";
+    const role = typeof req.body?.role === "string" ? req.body.role.trim() : "";
+    if (!company || !role) {
+      res.status(400).json({ ok: false, error: "company_and_role_required" });
+      return;
+    }
+    const career = findRegistryProject(registry, "career");
+    if (!career?.path) {
+      res.status(500).json({ ok: false, error: "career_path_missing" });
+      return;
+    }
+    const result = generateCareerPacket({
+      careerPath: career.path,
+      company,
+      role,
+      url: typeof req.body?.url === "string" ? req.body.url : undefined,
+      packet: typeof req.body?.packet === "string" ? req.body.packet : undefined,
+    });
+    if (!result.ok) {
+      res.status(500).json(result);
+      return;
+    }
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
+
+/** Save standup decisions from phone agent → atlas/inbox */
+app.post("/agent/write_standup_decisions", requireAgentToken, (req, res) => {
+  try {
+    const summary =
+      typeof req.body?.summary === "string" ? req.body.summary.trim() : "";
+    const decisions = Array.isArray(req.body?.decisions)
+      ? req.body.decisions
+          .map((d: { project?: string; text?: string; approvalDays?: number }) => ({
+            project: String(d?.project ?? "atlas").trim() || "atlas",
+            text: String(d?.text ?? "").trim(),
+            approvalDays:
+              typeof d?.approvalDays === "number" ? d.approvalDays : 1,
+          }))
+          .filter((d: { text: string }) => d.text)
+      : [];
+    if (!summary && decisions.length === 0) {
+      res.status(400).json({ ok: false, error: "summary_or_decisions_required" });
+      return;
+    }
+    const written = writeStandupDecisions(registry, summary || "Phone standup", decisions, db);
+    startLoopClose({
+      source: "phone",
+      note: summary || "Phone standup decisions saved.",
+    });
+    res.json({ ok: true, path: written.path, closeout: "started" });
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
+
+/** Save a short call/session summary into project inbox */
+app.post("/agent/save_call_summary", requireAgentToken, (req, res) => {
+  try {
+    const projectRaw =
+      typeof req.body?.project === "string" ? req.body.project.trim().toLowerCase() : "atlas";
+    const project =
+      projectRaw === "vocallearn" || projectRaw.includes("vocal")
+        ? "vocallearn"
+        : projectRaw === "career" || projectRaw.includes("career")
+          ? "career"
+          : "atlas";
+    const title =
+      typeof req.body?.title === "string" && req.body.title.trim()
+        ? req.body.title.trim()
+        : "Phone standup summary";
+    const summary =
+      typeof req.body?.summary === "string" ? req.body.summary.trim() : "";
+    if (!summary) {
+      res.status(400).json({ ok: false, error: "summary_required" });
+      return;
+    }
+    const actionItems = Array.isArray(req.body?.action_items)
+      ? req.body.action_items.map((x: unknown) => String(x)).filter(Boolean)
+      : [];
+    const body = [
+      summary,
+      "",
+      "## Action items",
+      actionItems.length
+        ? actionItems.map((a: string) => `- ${a}`).join("\n")
+        : "_None listed._",
+    ].join("\n");
+    const written = writeInboxArtifact(
+      registry,
+      { project, title, body },
+      db,
+    );
+    startLoopClose({
+      source: "phone",
+      note: summary,
+    });
+    res.json({ ok: true, path: written.path, project, closeout: "started" });
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
+
+app.get("/agent/where_we_left_off", requireAgentToken, (_req, res) => {
+  try {
+    res.json(buildWhereWeLeftOff({ atlasRoot, dataDir, registry }));
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
+
+app.post("/agent/session_close", requireAgentToken, async (req, res) => {
+  try {
+    const note =
+      typeof req.body?.note === "string" ? req.body.note.trim() : "";
+    const source = parseLoopSource(req.body?.source);
+    const workspacePath =
+      typeof req.body?.workspacePath === "string"
+        ? req.body.workspacePath.trim()
+        : undefined;
+    const projectRaw =
+      typeof req.body?.project === "string" ? req.body.project.trim().toLowerCase() : "";
+    const project: InboxProjectSlug | undefined =
+      projectRaw === "vocallearn" || projectRaw.includes("vocal")
+        ? "vocallearn"
+        : projectRaw === "career" || projectRaw.includes("career")
+          ? "career"
+          : projectRaw === "atlas"
+            ? "atlas"
+            : inferProjectFromWorkspace(workspacePath);
+    if (!note && source !== "session-end") {
+      res.status(400).json({ ok: false, error: "note_required" });
+      return;
+    }
+    const result = await enqueueCloseSessionLoop({
+      atlasRoot,
+      dataDir,
+      db,
+      registry,
+      source,
+      note:
+        note ||
+        `Cursor session ended without an agent summary (${workspacePath || "unknown workspace"}). Check git and today's inbox.`,
+      project,
+      workspacePath,
+      skipSync: req.body?.skipSync === true,
+    });
+    res.json({
+      ok: result.ok,
+      stamp: result.stamp,
+      sessionNotePath: result.sessionNotePath,
+      briefPath: result.briefPath,
+      sync: result.sync,
+      errors: result.errors,
+    });
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
+
 app.get("/health", (_req, res) => {
   const cost = getCostMtdSnapshot(db);
+  const lastClose = readLoopCloseStamp(dataDir);
   res.json({
     ok: true,
     service: "atlas",
@@ -122,6 +421,15 @@ app.get("/health", (_req, res) => {
     schedulers: {
       morningBrief: getMorningBriefSchedulerStatus(dataDir),
       managers: getManagerSchedulerStatus(dataDir),
+      phoneBrief: getPhoneBriefSchedulerStatus(dataDir),
+    },
+    loop: {
+      lastCloseAt: lastClose?.at ?? null,
+      lastCloseSource: lastClose?.source ?? null,
+      lastCollectionSyncAt: lastClose?.collectionSyncedAt ?? null,
+      collectionOk: lastClose?.collectionOk ?? null,
+      stale: loopCloseIsStale(lastClose),
+      errors: lastClose?.errors ?? [],
     },
     cost,
   });
@@ -762,18 +1070,23 @@ httpServer.listen(port, host, () => {
 
   seedSpeakerProfiles(db);
 
-  // Boot-time scan — refresh cache when git HEAD changes or no reports yet
-  const active = getActiveProjects(registry);
-  const snapshots = syncProjectsToDb(db, active, { deep: false });
-  const stale = projectsNeedingRefresh(db, snapshots);
-  const toStore = getLatestReports(db).length ? stale : snapshots;
-  if (toStore.length) {
-    for (const snap of toStore) {
-      storeProjectReport(db, snap, stale.length ? "boot-refresh" : "boot");
+  try {
+    // Boot-time scan — refresh cache when git HEAD changes or no reports yet
+    const active = getActiveProjects(registry);
+    const snapshots = syncProjectsToDb(db, active, { deep: false });
+    const stale = projectsNeedingRefresh(db, snapshots);
+    const toStore = getLatestReports(db).length ? stale : snapshots;
+    if (toStore.length) {
+      for (const snap of toStore) {
+        storeProjectReport(db, snap, stale.length ? "boot-refresh" : "boot");
+      }
+      console.log(`Cached ${toStore.length} project report(s) (git HEAD refresh)`);
     }
-    console.log(`Cached ${toStore.length} project report(s) (git HEAD refresh)`);
+  } catch (error) {
+    console.warn("[atlas] boot scan failed (server still up):", error);
   }
 
   startMorningBriefScheduler(analystDeps);
   startManagerScheduler(analystDeps);
+  startPhoneBriefScheduler(analystDeps);
 });

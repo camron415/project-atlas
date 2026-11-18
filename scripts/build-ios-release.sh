@@ -58,4 +58,24 @@ echo ""
 cd "${ROOT}/apps/mobile"
 bash "${ROOT}/scripts/patch-ios-ats.sh" "${ROOT}/apps/mobile/ios/Atlas/Info.plist"
 
-exec npx expo run:ios --device "${DEVICE}" --configuration Release
+# expo run:ios cannot pass -allowProvisioningUpdates (Expo parses -p as --port).
+# xcodebuild with -allowProvisioningUpdates refreshes free-team 7-day profiles.
+echo "Building with xcodebuild (-allowProvisioningUpdates for fresh signing)..."
+xcodebuild \
+  -workspace ios/Atlas.xcworkspace \
+  -scheme Atlas \
+  -configuration Release \
+  -destination "id=${DEVICE}" \
+  -allowProvisioningUpdates \
+  -quiet \
+  DEVELOPMENT_TEAM=TGB6PR4AJQ
+
+APP_PATH="$(find ~/Library/Developer/Xcode/DerivedData/Atlas-*/Build/Products/Release-iphoneos/Atlas.app -maxdepth 0 2>/dev/null | head -1)"
+if [[ -z "${APP_PATH}" || ! -d "${APP_PATH}" ]]; then
+  echo "Build succeeded but Atlas.app not found in DerivedData"
+  exit 1
+fi
+
+echo "Installing to ${DEVICE}..."
+xcrun devicectl device install app --device "${DEVICE}" "${APP_PATH}"
+echo "Done — Atlas installed (${APP_PATH})"

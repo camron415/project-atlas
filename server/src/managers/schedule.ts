@@ -1,16 +1,18 @@
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ManagerRunDeps, ManagerSchedulerStatus } from "./types.js";
 import { parseManagerProjects, runManagers } from "./run.js";
+import { enqueueCloseSessionLoop } from "../agent/loop-close.js";
 
 function managerHour(): number {
-  const raw = Number(process.env.ATLAS_MANAGER_HOUR ?? 7);
-  return Number.isFinite(raw) ? Math.min(23, Math.max(0, raw)) : 7;
+  const raw = Number(process.env.ATLAS_MANAGER_HOUR ?? 6);
+  return Number.isFinite(raw) ? Math.min(23, Math.max(0, raw)) : 6;
 }
 
 function managerMinute(): number {
-  const raw = Number(process.env.ATLAS_MANAGER_MINUTE ?? 15);
-  return Number.isFinite(raw) ? Math.min(59, Math.max(0, raw)) : 15;
+  const raw = Number(process.env.ATLAS_MANAGER_MINUTE ?? 0);
+  return Number.isFinite(raw) ? Math.min(59, Math.max(0, raw)) : 0;
 }
 
 function localDateKey(date = new Date()): string {
@@ -23,6 +25,8 @@ function localDateKey(date = new Date()): string {
 function lastRunPath(dataDir: string): string {
   return path.join(dataDir, "manager-last-run.txt");
 }
+
+const atlasRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 
 function readLastRunDate(dataDir: string): string | null {
   try {
@@ -78,6 +82,38 @@ export function startManagerScheduler(deps: ManagerRunDeps): void {
         }
       }
       writeLastRunDate(deps.dataDir, today);
+
+      const wrote = results.filter((r) => r.ok && !r.skipped);
+      const skipped = results.filter((r) => r.skipped);
+      const failed = results.filter((r) => !r.ok);
+      try {
+        const dump = await enqueueCloseSessionLoop({
+          atlasRoot,
+          dataDir: deps.dataDir,
+          db: deps.db,
+          registry: deps.registry,
+          source: "manager",
+          note: [
+            `Overnight managers finished.`,
+            wrote.length
+              ? `Wrote: ${wrote.map((r) => r.project).join(", ")}.`
+              : "No new manager files.",
+            skipped.length ? `Already had today's prep: ${skipped.map((r) => r.project).join(", ")}.` : "",
+            failed.length ? `Failed: ${failed.map((r) => `${r.project} (${r.error})`).join(", ")}.` : "",
+          ]
+            .filter(Boolean)
+            .join(" "),
+        });
+        if (dump.ok) {
+          console.log(`[manager] Loop dump ok collection=${String(dump.stamp.collectionOk)}`);
+        } else {
+          console.warn(`[manager] Loop dump errors: ${dump.errors.join("; ")}`);
+        }
+      } catch (error) {
+        console.warn(
+          `[manager] Loop dump error: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
     } finally {
       running = false;
     }

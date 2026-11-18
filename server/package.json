@@ -13,6 +13,11 @@
     "analyst": "tsx src/cli/analyst.ts",
     "morning-brief": "tsx src/cli/morning-brief.ts",
     "manager": "tsx src/cli/manager.ts",
+    "phone-brief": "tsx src/cli/phone-brief.ts",
+    "inspect-phone-collection": "tsx src/cli/inspect-phone-collection.ts",
+    "refresh-phone-knowledge": "tsx src/cli/refresh-phone-knowledge.ts",
+    "mark-applied": "tsx src/cli/mark-applied.ts",
+    "generate-packet": "tsx src/cli/generate-packet.ts",
     "test:morning-brief": "tsx src/morning-brief/run.test.ts",
     "test:manager": "tsx src/managers/run.test.ts",
     "test:stt": "tsx src/xai/stt.test.ts",
@@ -21,7 +26,9 @@
     "test:routing": "tsx src/voice/routing.test.ts",
     "test:search": "tsx src/context/search.test.ts",
     "test:cost": "tsx src/cost/ledger.test.ts",
-    "test:learning": "tsx src/learning/triggers.test.ts"
+    "test:learning": "tsx src/learning/triggers.test.ts",
+    "test:loop-close": "tsx src/agent/loop-close.test.ts",
+    "test:latest-status": "tsx src/agent/latest-status.test.ts"
   },
   "dependencies": {
     "better-sqlite3": "^11.9.1",

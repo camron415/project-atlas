@@ -67,7 +67,9 @@ export function writeInboxArtifact(
   const filePath = path.join(inboxDir, filename);
 
   let finalPath = filePath;
-  if (fs.existsSync(filePath)) {
+  const overwriteCanonical =
+    req.overwrite === true || slug === "standup-prep" || slug === "latest";
+  if (fs.existsSync(filePath) && !overwriteCanonical) {
     const stamp = writtenAt.slice(11, 19).replace(/:/g, "");
     finalPath = path.join(inboxDir, `${datePrefix}-${slug}-${stamp}.md`);
   }

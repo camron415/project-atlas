@@ -1,6 +1,7 @@
 import type { InboxProjectSlug } from "../inbox/types.js";
 import type { ManagerRunDeps, ManagerRunResult } from "./types.js";
 import { runVocalLearnManager } from "./vocalllearn/run.js";
+import { runCareerManager } from "./career/run.js";
 import { parseManagerProjects } from "./projects.js";
 
 export async function runManagerForProject(
@@ -11,12 +12,13 @@ export async function runManagerForProject(
   switch (project) {
     case "vocallearn":
       return runVocalLearnManager(deps, options);
-    case "atlas":
     case "career":
+      return runCareerManager(deps, options);
+    case "atlas":
       return {
         project,
         ok: false,
-        error: `Manager not implemented for ${project} yet (Wave 4+)`,
+        error: `Manager not implemented for ${project} yet`,
       };
     default:
       return { project, ok: false, error: `Unknown manager project: ${project}` };

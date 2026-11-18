@@ -42,8 +42,12 @@ function readRoadmapExcerpt(project: RegistryProject): {
     const fullPath = path.join(project.path, file);
     if (!fs.existsSync(fullPath)) continue;
     filesFound.push(file);
-    const content = fs.readFileSync(fullPath, "utf8");
-    chunks.push(`## ${file}\n${content.slice(0, 4000)}`);
+    try {
+      const content = fs.readFileSync(fullPath, "utf8");
+      chunks.push(`## ${file}\n${content.slice(0, 4000)}`);
+    } catch (error) {
+      chunks.push(`## ${file}\n_Could not read (${error instanceof Error ? error.message : String(error)})._`);
+    }
   }
 
   return {

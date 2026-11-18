@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "command": "scripts/cursor-hooks/session-start.py",
+        "timeout": 20
+      }
+    ],
+    "sessionEnd": [
+      {
+        "command": "scripts/cursor-hooks/session-end.py",
+        "timeout": 120
+      }
+    ]
+  }
+}

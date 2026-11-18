@@ -61,6 +61,66 @@
     .hold.live { background: var(--hold); color: white; }
     .hold:disabled { opacity: 0.45; cursor: wait; }
     .wide { width: 100%; margin-top: 10px; min-height: 44px; }
+    .tools { display: flex; gap: 8px; margin-top: 10px; }
+    .tools .ghost { flex: 1; min-height: 44px; }
+    .settings { margin-top: 10px; }
+    .settings > summary {
+      list-style: none;
+      cursor: pointer;
+      color: var(--muted);
+      font: 14px/1.3 -apple-system, BlinkMacSystemFont, sans-serif;
+      padding: 8px 0;
+    }
+    .settings > summary::-webkit-details-marker { display: none; }
+    .settings[open] > summary { color: var(--ink); }
+    .settings .prefs {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 4px;
+    }
+    .seg {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 6px 6px 7px;
+    }
+    .seg span {
+      display: block;
+      color: var(--muted);
+      font: 12px/1.2 -apple-system, BlinkMacSystemFont, sans-serif;
+      letter-spacing: 0.04em;
+      text-align: center;
+      margin-bottom: 6px;
+    }
+    .seg .pair { display: flex; gap: 4px; }
+    .seg button {
+      flex: 1;
+      min-height: 36px;
+      border: 0;
+      border-radius: 10px;
+      background: transparent;
+      color: var(--ink);
+      font: 14px/1 -apple-system, BlinkMacSystemFont, sans-serif;
+      padding: 6px 1px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .seg button.on { background: var(--gold); color: #1a160c; }
+    .seg .triple { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px; }
+    .seg .triple button { font-size: 12px; padding: 6px 2px; }
+    .pref-note { font-size: 13px; margin: 8px 0 0; min-height: 2.6em; }
+    .manual-turn {
+      display: none;
+      margin-top: 10px;
+      min-height: 52px;
+      font-size: 18px;
+      background: var(--card);
+      border-color: var(--gold);
+      color: var(--gold);
+    }
+    .manual-turn.on { background: var(--gold); color: #1a160c; border-color: transparent; }
+    .manual-turn.show { display: block; }
     details { margin-top: 14px; }
     summary { cursor: pointer; }
     form { display: flex; gap: 8px; margin-top: 12px; }
@@ -83,6 +143,7 @@
       cursor: pointer;
     }
     .ghost.on { background: var(--hold); color: white; border-color: transparent; }
+    .ghost.practice.on { background: var(--gold); color: #1a160c; }
     .row { display: flex; gap: 8px; margin-top: 10px; }
     .log {
       margin-top: 8px;
@@ -90,7 +151,7 @@
       flex-direction: column;
       gap: 12px;
       overflow: auto;
-      max-height: 38dvh;
+      max-height: 24dvh;
     }
     .bubble { background: var(--card); border-radius: 14px; padding: 12px 14px; }
     .bubble b { display: block; font-size: 13px; letter-spacing: 0.04em; color: var(--gold); font-weight: 600; }
@@ -131,13 +192,45 @@
 <body>
   <main>
     <h1>Atlas</h1>
-    <p class="sub">Leave this open, or lock the phone. The call stays up. Talk over her when you want her to stop.</p>
     <p class="status" id="status">Starting…</p>
     <div class="log" id="log"></div>
     <p class="meta" id="meta"></p>
-    <button class="ghost wide" id="mute" type="button">Mute</button>
-    <button class="ghost wide" id="pocket" type="button">Pocket lock</button>
+    <button class="ghost manual-turn" id="manual-turn" type="button">Start turn</button>
     <button class="hold" id="call" disabled>Start call</button>
+    <details class="settings">
+      <summary>Call settings</summary>
+      <div class="prefs">
+        <div class="seg" role="group" aria-label="Brain">
+          <span>Brain</span>
+          <div class="pair">
+            <button type="button" id="brain-grok">Grok</button>
+            <button type="button" id="brain-plus">Plus</button>
+            <button type="button" id="brain-flash">Flash</button>
+          </div>
+        </div>
+        <div class="seg" role="group" aria-label="Voice">
+          <span>Voice</span>
+          <div class="pair">
+            <button type="button" id="mouth-phonon">Phonon</button>
+            <button type="button" id="mouth-kokoro">Kokoro</button>
+          </div>
+        </div>
+        <div class="seg" role="group" aria-label="Who ends your turn">
+          <span>Turn ends</span>
+          <div class="triple">
+            <button type="button" id="end-mac">Mac</button>
+            <button type="button" id="end-phone">Phone</button>
+            <button type="button" id="end-manual">Manual</button>
+          </div>
+        </div>
+      </div>
+      <p class="meta pref-note" id="pref-note"></p>
+      <div class="tools">
+        <button class="ghost practice" id="practice-1" type="button" title="Daniel 1–7 youth lesson">1</button>
+        <button class="ghost" id="mute" type="button">Mute</button>
+        <button class="ghost" id="phone" type="button">Phone voice</button>
+      </div>
+    </details>
     <details>
       <summary>Type instead</summary>
       <form id="typed">
@@ -150,12 +243,6 @@
       </div>
     </details>
   </main>
-  <div class="lock" id="lock">
-    <h2>Pocket lock is on</h2>
-    <p>The call keeps going. A tap will not cut her off or end the call.</p>
-    <p id="lockhint">Hold anywhere for 3 seconds to unlock.</p>
-    <div class="holdbar" aria-hidden="true"><span id="lockfill"></span></div>
-  </div>
   <script>
     const statusEl = document.querySelector("#status");
     const callBtn = document.querySelector("#call");
@@ -171,7 +258,6 @@
     const BARGE_MS = 300;
     const PARTIAL_FIRST_MS = 400;
     const PARTIAL_GAP_MS = 900;
-    const LOCK_MS = 3000;
     const params = new URLSearchParams(location.search);
     if (params.get("k")) localStorage.setItem("atlas-gate", params.get("k"));
     const gateKey = params.get("k") || localStorage.getItem("atlas-gate") || "";
@@ -205,23 +291,182 @@
     let partialBusy = false;
     let partialAt = 0;
     let partialsSent = 0;
-    let lockHold = 0;
     let playbackFloor = 0.02;
     let clipFloor = 0.02;
     let playGen = 0;
-    let pocket = false;
     let duplex = false;
     let replyEl = null;
     let nativePlay = null;
     let nativeBroken = false;
-    let holdTimer = 0;
     const audioQueue = [];
 
     function setStatus(value) { statusEl.textContent = value; }
 
+    let brainChoice = "plus";
+    let mouthChoice = localStorage.getItem("atlas.mouth") === "kokoro" ? "kokoro" : "phonon";
+    let phoneVoice = false;
+    let endMode = localStorage.getItem("atlas.endMode") || "";
+    if (!endMode) {
+      endMode = localStorage.getItem("atlas.phoneEnds") === "1" ? "phone" : "mac";
+    }
+    let manualSegment = false;
+    let captionCarry = "";
+    let captionWindow = "";
+    let brainStamp = 0;
+    let practiceSlot = localStorage.getItem("atlas.practice") === "1" ? "1" : "";
+    const prefNote = document.querySelector("#pref-note");
+    const manualBtn = document.querySelector("#manual-turn");
+
+    function brainName(name) {
+      if (name === "flash" || name === "grok" || name === "plus") return name;
+      return "plus";
+    }
+
+    function endName(mode) {
+      if (mode === "mac" || mode === "phone" || mode === "manual") return mode;
+      if (mode === true || mode === "true") return "phone";
+      return "mac";
+    }
+
+    function captionWords(text) {
+      return String(text || "").trim().split(/\s+/).filter(Boolean);
+    }
+
+    function captionJoin(parts) {
+      return parts.map((p) => String(p || "").trim()).filter(Boolean).join(" ");
+    }
+
+    function captionKey(word) {
+      return String(word).toLowerCase().replace(/[^a-z0-9']/g, "");
+    }
+
+    function expandCaption(prior, piece) {
+      prior = String(prior || "").trim();
+      piece = String(piece || "").trim();
+      if (!prior) return piece;
+      if (!piece) return prior;
+      const priorWords = captionWords(prior);
+      const pieceWords = captionWords(piece);
+      const priorKeys = priorWords.map(captionKey);
+      const pieceKeys = pieceWords.map(captionKey);
+      let overlap = 0;
+      for (let n = Math.min(priorKeys.length, pieceKeys.length); n > 0; n -= 1) {
+        if (priorKeys.slice(-n).join("|") === pieceKeys.slice(0, n).join("|")) {
+          overlap = n;
+          break;
+        }
+      }
+      const tail = pieceWords.slice(overlap);
+      return tail.length ? captionJoin([prior, captionJoin(tail)]) : prior;
+    }
+
+    function paintPrefs() {
+      document.querySelector("#brain-grok").classList.toggle("on", brainChoice === "grok");
+      document.querySelector("#brain-plus").classList.toggle("on", brainChoice === "plus");
+      document.querySelector("#brain-flash").classList.toggle("on", brainChoice === "flash");
+      document.querySelector("#mouth-phonon").classList.toggle("on", mouthChoice === "phonon");
+      document.querySelector("#mouth-kokoro").classList.toggle("on", mouthChoice === "kokoro");
+      document.querySelector("#end-mac").classList.toggle("on", endMode === "mac");
+      document.querySelector("#end-phone").classList.toggle("on", endMode === "phone");
+      document.querySelector("#end-manual").classList.toggle("on", endMode === "manual");
+      document.querySelector("#practice-1").classList.toggle("on", practiceSlot === "1");
+      manualBtn.classList.toggle("show", callOn && endMode === "manual");
+      manualBtn.classList.toggle("on", !!manualSegment);
+      manualBtn.textContent = manualSegment ? "Send turn" : "Start turn";
+      const voice = mouthChoice === "phonon"
+        ? (phoneVoice ? "Phonon speaks on this phone." : "Phonon needs Phone voice on. The Mac still uses Kokoro.")
+        : "Kokoro speaks.";
+      const brain = brainChoice === "flash" ? "Flash answers." : brainChoice === "grok" ? "Grok answers." : "Plus answers.";
+      const lesson = practiceSlot === "1" ? "Lesson 1: Daniel youth Sunday School (Plus). " : "";
+      const end = endMode === "manual"
+        ? "You start and send each turn with the button."
+        : endMode === "phone"
+          ? "A short quiet on the phone ends your turn."
+          : "The Mac decides when you have finished.";
+      prefNote.textContent = `${lesson}${voice} ${brain} ${end}`;
+    }
+
+    function enterManualIdle() {
+      manualSegment = false;
+      stopListen();
+      pcmChunks = [];
+      pcmSamples = 0;
+      heardSpeech = false;
+      silenceMs = 0;
+      liveYou = null;
+      if (callOn) setStatus("Tap Start turn when ready.");
+      paintPrefs();
+    }
+
+    function resumeAfterTurn() {
+      if (!callOn || playing || audioQueue.length) return;
+      if (endMode === "manual" && !duplex) enterManualIdle();
+      else armListen();
+    }
+
+    function toggleManualTurn() {
+      if (!callOn || endMode !== "manual" || busy || playing) return;
+      if (duplex || hasNative()) {
+        if (!manualSegment) {
+          tellNative("manual", { start: true });
+          captionCarry = "";
+          captionWindow = "";
+          manualSegment = true;
+          paintPrefs();
+          setStatus("Recording… tap Send turn when done.");
+        } else {
+          tellNative("manual", { start: false });
+        }
+        return;
+      }
+      if (!manualSegment) {
+        captionCarry = "";
+        captionWindow = "";
+        manualSegment = true;
+        armListen();
+        setStatus("Recording… tap Send turn when done.");
+        paintPrefs();
+        return;
+      }
+      if (!heardSpeech) {
+        setStatus("Say something first, then tap Send turn.");
+        return;
+      }
+      manualSegment = false;
+      paintPrefs();
+      considerEnd(true);
+    }
+
+    function rememberBrain() {
+      fetch("/brain", withGate({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: brainChoice }),
+      })).catch(() => {});
+    }
+
+    function rememberPractice() {
+      fetch("/practice", withGate({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slot: practiceSlot }),
+      })).catch(() => {});
+    }
+
+    function rememberEnd() {
+      fetch("/end-mode", withGate({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: endMode || "mac" }),
+      })).catch(() => {});
+    }
+
     function withGate(init = {}) {
       const headers = new Headers(init.headers || {});
       if (gateKey) headers.set("X-Atlas-Gate", gateKey);
+      headers.set("X-Atlas-Brain", brainChoice);
+      headers.set("X-Atlas-End", endMode || "mac");
+      if (practiceSlot) headers.set("X-Atlas-Practice", practiceSlot);
       return { ...init, headers };
     }
 
@@ -252,11 +497,16 @@
       return !nativeBroken && !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.atlas);
     }
 
+    function bridge() {
+      return window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.atlas;
+    }
+
     function tellNative(op, extra) {
-      if (!hasNative() && op !== "stop" && op !== "release") return;
-      const bridge = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.atlas;
-      if (!bridge) return;
-      bridge.postMessage(Object.assign({ op }, extra || {}));
+      const prefs = op === "brain" || op === "end" || op === "manual";
+      if (!hasNative() && !prefs && op !== "stop" && op !== "release") return;
+      const link = bridge();
+      if (!link) return;
+      link.postMessage(Object.assign({ op }, extra || {}));
     }
 
     function releaseWebMic() {
@@ -307,7 +557,7 @@
       const bytes = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
       statusEl.classList.add("speaking");
-      setStatus(pocket ? "Speaking… hold here to interrupt" : "Speaking… talk or tap to interrupt");
+      setStatus("Speaking… talk or tap to interrupt");
       playBuffer(bytes.buffer, gen).then((finished) => {
         if (finished && gen === playGen) playNext();
       });
@@ -348,7 +598,7 @@
       }
       if (why === "barge") {
         pending.resolve(false);
-        if (!pocket) bargeIn();
+        bargeIn();
         return;
       }
       pending.resolve(pending.gen === playGen);
@@ -429,13 +679,14 @@
       const data = event.inputBuffer.getChannelData(0);
       pcmChunks.push(new Float32Array(data));
       pcmSamples += data.length;
-      const cap = (audioCtx?.sampleRate || 48000) * 90;
+      const cap = (audioCtx?.sampleRate || 48000) * (endMode === "manual" && manualSegment ? 300 : 90);
       while (pcmSamples > cap && pcmChunks.length > 1) pcmSamples -= pcmChunks.shift().length;
     }
 
     async function sendPartial() {
       if (!callOn || !listening || busy || playing || probeBusy || partialBusy || !heardSpeech) return;
-      const blob = wavFromPcm(8);
+      const partialWindow = endMode === "manual" && manualSegment ? 15 : 8;
+      const blob = wavFromPcm(partialWindow);
       if (!blob) return;
       partialBusy = true;
       const body = new FormData();
@@ -446,7 +697,14 @@
         const data = await res.json();
         if (data.busy || !data.text) return;
         if (!liveYou) liveYou = addBubble("You", "…", "live-you");
-        liveYou.textContent = data.text;
+        let line = data.text;
+        if (endMode === "manual" && manualSegment) {
+          const prior = captionJoin([captionCarry, captionWindow]);
+          line = expandCaption(prior, data.text);
+          captionCarry = "";
+          captionWindow = line;
+        }
+        liveYou.textContent = line;
         liveYou.closest(".bubble")?.classList.add("live-you");
       } catch { /* offline or server busy */ }
       finally { partialBusy = false; }
@@ -499,6 +757,13 @@
     }
 
     async function runTurn(body, label) {
+      if (typeof body === "string" && endMode === "manual") {
+        try {
+          const payload = JSON.parse(body);
+          payload.commit = "1";
+          body = JSON.stringify(payload);
+        } catch { /* leave the body as typed */ }
+      }
       if (!ready) return;
       const token = ++turnToken;
       liveToken = token;
@@ -534,7 +799,7 @@
           if (!playing && !audioQueue.length) {
             statusEl.classList.remove("speaking");
           }
-          if (callOn && !playing && !audioQueue.length) armListen();
+          if (callOn && !playing && !audioQueue.length) resumeAfterTurn();
           else if (!callOn && !playing) setStatus("Ready");
         }
       }
@@ -572,10 +837,14 @@
       nextProbeAt = CHECK_MS;
       const resume = () => {
         if (!callOn || playing) return;
+        if (endMode === "manual" && !manualSegment) {
+          enterManualIdle();
+          return;
+        }
         armListen();
         heardSpeech = true;
         silenceMs = 0;
-        setStatus("Listening…");
+        setStatus(manualSegment ? "Recording… tap Send turn when done." : "Listening…");
       };
       if (stream) resume();
       else ensureMic().then(resume).catch(() => setStatus("Tap Start call to allow the microphone."));
@@ -603,6 +872,7 @@
       const body = new FormData();
       body.append("audio", blob, "turn.wav");
       if (!force) body.append("probe", "1");
+      if (force && endMode === "manual") body.append("commit", "1");
       let you = null;
       let reply = null;
       try {
@@ -639,7 +909,7 @@
         if (token === turnToken) {
           busy = false;
           probeBusy = false;
-          if (callOn && !playing && !audioQueue.length) armListen();
+          if (callOn && !playing && !audioQueue.length) resumeAfterTurn();
         }
       }
     }
@@ -750,7 +1020,6 @@
       const dt = lastTick ? now - lastTick : 16;
       lastTick = now;
       if (playing || busy) {
-        if (pocket) return;
         playbackFloor = playbackFloor * 0.94 + rms * 0.06;
         if (bargeSignal(rms)) {
           bargeMs += dt;
@@ -761,6 +1030,7 @@
         return;
       }
       if (!listening) return;
+      if (endMode === "manual" && !manualSegment) return;
       const speaking = rms > (heardSpeech ? SPEECH_KEEP : SPEECH_RMS);
       if (speaking) {
         if (!heardSpeech) {
@@ -774,7 +1044,11 @@
         bargeMs = 0;
         if (probeBusy) dropProbe(liveToken);
         if (!partialAt) partialAt = now;
-        const wait = partialsSent === 0 ? PARTIAL_FIRST_MS : PARTIAL_GAP_MS;
+        const wait = endMode === "manual" && manualSegment
+          ? 1100
+          : partialsSent === 0
+            ? PARTIAL_FIRST_MS
+            : PARTIAL_GAP_MS;
         if (!partialBusy && now - partialAt >= wait) {
           partialAt = now;
           partialsSent += 1;
@@ -787,6 +1061,14 @@
           sendPartial();
         }
         silenceMs += dt;
+        if (endMode === "manual") return;
+        if (endMode === "phone") {
+          if (!armedForce && silenceMs >= 850) {
+            armedForce = true;
+            considerEnd(true);
+          }
+          return;
+        }
         if (!armedForce && silenceMs >= HOLD_MAX_MS) {
           armedForce = true;
           considerEnd(true);
@@ -817,12 +1099,14 @@
       callOn = true;
       callBtn.classList.add("live");
       callBtn.textContent = "End call";
+      paintPrefs();
       await holdWake();
       if (hasNative()) {
         duplex = true;
         tellNative("arm");
         return;
       }
+      duplex = false;
       await startWebCall();
     }
 
@@ -837,22 +1121,11 @@
       tellNative("release");
       if (callOn && !busy) {
         await ensureMic();
-        if (callOn && !busy && !playing) armListen();
+        if (callOn && !busy && !playing) resumeAfterTurn();
       }
     }
 
-    function setPocket(on) {
-      pocket = on;
-      document.querySelector("#pocket").textContent = pocket ? "Pocket lock on" : "Pocket lock";
-      const lock = document.querySelector("#lock");
-      lock.classList.toggle("on", pocket);
-      document.querySelector("#lockfill").style.width = "0%";
-      document.querySelector("#lockhint").textContent = "Hold anywhere for 3 seconds to unlock.";
-      tellNative("lock", { on: pocket });
-    }
-
     function endCall() {
-      if (pocket) setPocket(false);
       const token = liveToken;
       turnToken += 1;
       epoch += 1;
@@ -873,17 +1146,12 @@
       stopSpeaking();
       statusEl.classList.remove("speaking");
       releaseWake();
+      manualSegment = false;
+      paintPrefs();
       setStatus("Ready");
     }
 
-    statusEl.addEventListener("pointerdown", () => {
-      if (!pocket || !callOn || (!playing && !busy)) return;
-      holdTimer = window.setTimeout(() => bargeIn(), 450);
-    });
-    statusEl.addEventListener("pointerup", () => window.clearTimeout(holdTimer));
-    statusEl.addEventListener("pointerleave", () => window.clearTimeout(holdTimer));
     statusEl.addEventListener("click", () => {
-      if (pocket) return;
       if (duplex) {
         if (callOn) tellNative("barge");
         return;
@@ -904,45 +1172,109 @@
       muteBtn.classList.toggle("on", !!on);
     };
 
-    document.querySelector("#pocket").addEventListener("click", () => {
-      if (pocket) return;
-      if (!callOn) {
-        setStatus("Start the call, then pocket lock.");
+    const phoneBtn = document.querySelector("#phone");
+    phoneBtn.addEventListener("click", () => {
+      if (!hasNative()) {
+        setStatus("Open this in the Atlas app.");
         return;
       }
-      setPocket(true);
+      tellNative("phone");
     });
+    window.atlasPhone = (on) => {
+      phoneVoice = !!on;
+      phoneBtn.textContent = on ? "Phone voice on" : "Phone voice";
+      phoneBtn.classList.toggle("on", !!on);
+      paintPrefs();
+    };
+    function chooseMouth(next) {
+      mouthChoice = next === "kokoro" ? "kokoro" : "phonon";
+      localStorage.setItem("atlas.mouth", mouthChoice);
+      paintPrefs();
+      if (bridge()) tellNative("mouth", { name: mouthChoice });
+    }
 
-    const lockEl = document.querySelector("#lock");
-    const lockFill = document.querySelector("#lockfill");
-    const lockHint = document.querySelector("#lockhint");
-    function beginLockHold() {
-      if (!pocket) return;
-      const started = performance.now();
-      window.clearInterval(lockHold);
-      lockHold = window.setInterval(() => {
-        const held = performance.now() - started;
-        const portion = Math.min(1, held / LOCK_MS);
-        lockFill.style.width = `${portion * 100}%`;
-        const left = Math.max(1, Math.ceil((LOCK_MS - held) / 1000));
-        lockHint.textContent = portion >= 1 ? "Unlocked" : `Keep holding… ${left}`;
-        if (held >= LOCK_MS) {
-          window.clearInterval(lockHold);
-          setPocket(false);
-        }
-      }, 50);
+    function chooseBrain(next) {
+      brainChoice = brainName(next);
+      brainStamp = Date.now();
+      paintPrefs();
+      rememberBrain();
+      if (bridge()) tellNative("brain", { name: brainChoice });
     }
-    function cancelLockHold() {
-      window.clearInterval(lockHold);
-      if (!pocket) return;
-      lockFill.style.width = "0%";
-      lockHint.textContent = "Hold anywhere for 3 seconds to unlock.";
+    function togglePractice1() {
+      if (practiceSlot === "1") {
+        practiceSlot = "";
+        localStorage.removeItem("atlas.practice");
+      } else {
+        practiceSlot = "1";
+        localStorage.setItem("atlas.practice", "1");
+        brainChoice = "plus";
+        brainStamp = Date.now();
+        rememberBrain();
+        if (bridge()) tellNative("brain", { name: "plus" });
+      }
+      paintPrefs();
+      rememberPractice();
+      if (practiceSlot === "1") setStatus("Daniel lesson tutor on. Plus for this call.");
+      else if (!callOn) setStatus("Ready");
     }
-    lockEl.addEventListener("pointerdown", beginLockHold);
-    window.addEventListener("pointerup", cancelLockHold);
-    window.addEventListener("pointercancel", cancelLockHold);
-    lockEl.addEventListener("contextmenu", (ev) => ev.preventDefault());
-    lockEl.addEventListener("touchmove", (ev) => ev.preventDefault(), { passive: false });
+    function chooseEnd(mode) {
+      endMode = endName(mode);
+      localStorage.setItem("atlas.endMode", endMode);
+      paintPrefs();
+      rememberEnd();
+      tellNative("end", { mode: endMode });
+      if (!callOn || duplex) return;
+      if (endMode === "manual") enterManualIdle();
+      else manualSegment = false;
+    }
+    document.querySelector("#practice-1").addEventListener("click", () => togglePractice1());
+    document.querySelector("#brain-grok").addEventListener("click", () => chooseBrain("grok"));
+    document.querySelector("#brain-plus").addEventListener("click", () => chooseBrain("plus"));
+    document.querySelector("#brain-flash").addEventListener("click", () => chooseBrain("flash"));
+    document.querySelector("#mouth-phonon").addEventListener("click", () => chooseMouth("phonon"));
+    document.querySelector("#mouth-kokoro").addEventListener("click", () => chooseMouth("kokoro"));
+    window.atlasMouth = (name) => {
+      mouthChoice = name === "kokoro" ? "kokoro" : "phonon";
+      localStorage.setItem("atlas.mouth", mouthChoice);
+      paintPrefs();
+    };
+    document.querySelector("#end-mac").addEventListener("click", () => chooseEnd("mac"));
+    document.querySelector("#end-phone").addEventListener("click", () => chooseEnd("phone"));
+    document.querySelector("#end-manual").addEventListener("click", () => chooseEnd("manual"));
+    manualBtn.addEventListener("click", () => toggleManualTurn());
+    window.atlasBrain = (name) => {
+      const echoed = brainName(name);
+      if (brainChoice === "flash" && echoed !== "flash" && Date.now() - brainStamp < 1500) {
+        paintPrefs();
+        rememberBrain();
+        return;
+      }
+      brainChoice = echoed;
+      paintPrefs();
+      rememberBrain();
+    };
+    window.atlasEnd = (mode) => {
+      const next = typeof mode === "boolean" ? (mode ? "phone" : "mac") : endName(mode);
+      if (localStorage.getItem("atlas.endMode") === "manual" && next !== "manual") {
+        tellNative("end", { mode: "manual" });
+        return;
+      }
+      endMode = next;
+      localStorage.setItem("atlas.endMode", endMode);
+      paintPrefs();
+      rememberEnd();
+      if (callOn && endMode === "manual" && !duplex) enterManualIdle();
+    };
+    window.atlasManual = (on) => {
+      manualSegment = !!on;
+      paintPrefs();
+      if (manualSegment) setStatus("Recording… tap Send turn when done.");
+      else if (callOn && endMode === "manual") setStatus("Tap Start turn when ready.");
+    };
+    paintPrefs();
+    rememberEnd();
+    tellNative("end", { mode: endMode || "mac" });
+    if (practiceSlot === "1") rememberPractice();
 
     callBtn.addEventListener("click", () => {
       if (!ready) return;

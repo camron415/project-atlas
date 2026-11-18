@@ -11,10 +11,12 @@ import {
   readRoadmapExcerpt,
   standupPrepExistsForToday,
 } from "../projects.js";
+import { synthesizeStandupPrepSections } from "../synthesize-prep.js";
+import { readHaloLoopContext } from "../../agent/where-we-left-off.js";
 
 const SLOANE = "Sloane";
 const VOCALLEARN_MANAGER_FOCUS =
-  "VocalLearn standup prep for Sloane (department lead): roadmap IDs vs HANDOFF, overnight git, concerns, top 3 priorities today with P0-P3 and S0-S3 tags, decisions needed with 1-day default approval window, auto-queue for S0/S1. Professional and concise.";
+  "Halo / Cove standup prep for Sloane (department lead). Halo family Ask website is the live shipping surface; language-learning VocalLearn is secondary until Camron reopens it. Overnight: outcomes not file lists; current Halo phase in plain English (live site, Lab vs Early vs Family, Soft Learn / Ask); top 3 Lab priorities today with P0-P3 and S0-S3 tags; decisions Camron can answer by voice; auto-queue for S0/S1 suggestion files only — do not edit Halo production source or deploy. Use cached Cursor session notes and phone dumps. Cost: keep family Ask near $1/user/week. Do not center the report on file paths or commit hashes.";
 
 const STANDUP_PREP_TITLE = "Standup prep";
 
@@ -94,35 +96,65 @@ export async function runVocalLearnManager(
     const analystMd = job.summaryMarkdown.trim();
     const standupMode = detectSkip(gitBlock, analystMd) ? "skip" : "active";
 
+    let synth;
+    try {
+      synth = await synthesizeStandupPrepSections({
+        projectLabel: "Halo / VocalLearn",
+        managerName: SLOANE,
+        gitBlock,
+        roadmapBlock,
+        analystMd,
+        extraContext: [
+          `Test status:\n${testBlock}`,
+          "",
+          readHaloLoopContext(deps.registry),
+        ].join("\n"),
+      });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.warn(`[manager] VocalLearn synth failed: ${msg}`);
+      synth = {
+        sinceYesterday: "_See git snapshot and analyst findings._",
+        roadmapPosition: "_See roadmap excerpt._",
+        proposedToday: "1. Review analyst findings and set today's top 3 (P/S).",
+        decisions: "None today",
+        autoQueue: "None today",
+        raw: "",
+      };
+    }
+
     const body = [
-      `# Standup prep — VocalLearn`,
+      `# Standup prep — Halo / VocalLearn`,
       `**Date:** ${new Date().toISOString()} · **Manager:** ${SLOANE}`,
       "",
       `standup: ${standupMode}`,
       "",
       "## Since yesterday",
-      "_See git snapshot and analyst findings._",
+      synth.sinceYesterday,
       "",
-      "## Git snapshot",
-      gitBlock,
-      "",
-      "## Roadmap excerpt",
-      roadmapBlock,
-      "",
-      "## Test status",
-      testBlock,
-      "",
-      "## Analyst findings",
-      analystMd,
+      "## Roadmap position",
+      synth.roadmapPosition,
       "",
       "## Proposed today (P / S)",
-      "1. _(Manager: list max 3 with P1–P3 and S0–S3 from analyst context)_",
+      synth.proposedToday,
       "",
       "## Decisions for Camron",
-      "1. _(If none: write \"None today\" — default approval window 1 day when listed)_",
+      synth.decisions,
       "",
       "## Auto queue (S0/S1)",
-      "- _(Tasks that need no standup approval)_",
+      synth.autoQueue,
+      "",
+      "## Mac only (do not read on phone)",
+      "Technical detail for Cursor / later review. Phone brief strips this section.",
+      "",
+      "### Git snapshot",
+      gitBlock,
+      "",
+      "### Test status",
+      testBlock,
+      "",
+      "### Analyst findings",
+      analystMd,
     ].join("\n");
 
     const written = writeInboxArtifact(deps.registry, {
