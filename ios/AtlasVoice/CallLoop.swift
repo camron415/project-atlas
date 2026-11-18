@@ -143,7 +143,7 @@ enum CallLoop {
     private static var lastStatus = "Listening…"
     private static var watchedInterrupt = false
     static var micMuted = false
-    /// Spoken mute keeps the mic open for the one word "unmute". The button still goes fully quiet.
+    /// Spoken "hold on" keeps the mic open for the one word "unmute". The button still goes fully quiet.
     private static var commandEar = false
     private static var sayTail: Task<Void, Never>?
     private static var saysLeft = 0
@@ -602,6 +602,27 @@ enum CallLoop {
         }
     }
 
+    /// Whole turn only. "Hold on, I was saying…" must still go to her.
+    private static func spokenCommand(_ text: String) -> String? {
+        let cleaned = text.lowercased()
+            .components(separatedBy: CharacterSet.letters.inverted)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        if [
+            "hold on",
+            "hold on one second",
+            "hold on a second",
+            "hold on one sec",
+            "hold on a sec",
+        ].contains(cleaned) {
+            return "mute"
+        }
+        if cleaned == "unmute" || cleaned == "un mute" {
+            return "unmute"
+        }
+        return nil
+    }
+
     /// Mic shows muted, but a lone "unmute" can still get through.
     private static func beginCommandListen() {
         guard isOn else { return }
@@ -1011,6 +1032,16 @@ enum CallLoop {
             }
         }
         let line = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let cmd = spokenCommand(line) {
+            let applied: Bool = await MainActor.run {
+                guard stamp == era, isOn else { return false }
+                showYou(line, live: false)
+                applyCommand(cmd)
+                return true
+            }
+            if applied { await postCommand(cmd) }
+            return
+        }
         let heardMs = stt
         let ready: (id: String, text: String) = await MainActor.run {
             guard stamp == era, isOn else { return ("", "") }

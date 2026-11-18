@@ -806,11 +806,21 @@ def record_turn(
         handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
+# Said alone. "Hold on, the market…" is a sentence and must not mute.
+HOLD_PHRASES = {
+    "hold on",
+    "hold on one second",
+    "hold on a second",
+    "hold on one sec",
+    "hold on a sec",
+}
+
+
 def command_word(text: str) -> str | None:
-    """A whole turn that is only the mute word. Never a word inside a sentence."""
+    """A whole turn that is only a command. Never a phrase inside a sentence."""
     cleaned = re.sub(r"[^a-z\s]", "", text.lower())
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
-    if cleaned in {"mute", "muted"}:
+    if cleaned in HOLD_PHRASES:
         return "mute"
     if cleaned in {"unmute", "un mute"}:
         return "unmute"
