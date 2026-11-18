@@ -1,7 +1,7 @@
 """Localhost Atlas voice loop.
 
-Ears: Parakeet on this Mac. Brain: Grok 4.3. Mouth: Kokoro, first sentence first.
-Open http://127.0.0.1:8791
+Phone is the handset. Brain: Qwen Flash by default, Qwen Plus on a real lookup.
+This Mac still hosts the server. Open http://127.0.0.1:8791
 """
 
 from __future__ import annotations
@@ -151,6 +151,7 @@ PACK = REPO / "atlas-personal-context"
 CHAT_INDEX = REPO / "archive/chats/INDEX.md"
 STORY_PATH = PACK / "career-planning-roadmap/career-dashboard-docs/MY_STORY.md"
 LIFE_PATH = PACK / "our-story-journey/CONTENT.md"
+CURRENT_STATUS = PACK / "voice-notes/CURRENT-2026-11-18.md"
 
 
 def read_clip(path: Path, limit: int, start: str = "", end: str = "") -> str:
@@ -652,6 +653,14 @@ Stay phone-spoken: short turns, invite him to try lines, push back gently if the
 """
 
 
+def current_status() -> str:
+    """Short standing truth. Loaded every call so GitHub updates reach the phone after a voice restart."""
+    if not CURRENT_STATUS.exists():
+        return ""
+    text = re.sub(r"\n{3,}", "\n\n", CURRENT_STATUS.read_text(errors="replace")).strip()
+    return text[:1800]
+
+
 def system_prompt(user_text: str, brain: str = "grok", practice_slot: str = "") -> str:
     # Day only, so the standing prompt can stay cached across a conversation.
     today = time.strftime("%A, %B %-d, %Y", time.localtime())
@@ -667,8 +676,11 @@ def system_prompt(user_text: str, brain: str = "grok", practice_slot: str = "") 
         )
     else:
         judge = "Judgment is Grok 4.3 through the xAI API, not a local model."
+    status = current_status()
     prompt = f"""You are Atlas, Camron's phone voice. He lives in Salt Lake City with Camila and is building Halo, a learning app, and you. Do not invent his job or private facts.
 You can hear him. Today is {today}, Mountain time. {judge}
+What is true right now, from GitHub. If an older file disagrees, this wins:
+{status}
 Answer from this brief and ordinary knowledge. You do not hold his files, live weather, or the news.
 A story is not a request. Rain, his work, the market, orchestration, and the repo come up in stories. Answer him, and do not look or offer.
 If he asks for a live fact or a file this brief cannot answer, look it up. If you are unsure he wants that, offer once and wait. In Sunday School rehearsal, offer or look only if he clearly asks.
