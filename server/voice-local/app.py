@@ -27,6 +27,8 @@ from pathlib import Path
 
 import numpy as np
 from fastapi import FastAPI, Request
+
+import cursor_bridge
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from starlette.requests import ClientDisconnect
 
@@ -1804,7 +1806,9 @@ CHOICE_NOTE = (
     "this brief cannot answer. web_search is for weather, news, prices, and scores. "
     "look_at_code must name a repo and a real query or path. "
     "Do not call because a word appeared, to be helpful, or with an empty target. "
-    "A story is not a call. On a call, set spoken_ack to one short true clause. Otherwise call nothing."
+    "A story is not a call. On a call, set spoken_ack to one short true clause. Otherwise call nothing. "
+    "Call send_to_cursor only when he asks you to start real work: an edit, a test run, or a harness change. "
+    "The gist is one plain sentence of that job. You do not start it. He must say yes after he hears you."
 )
 PLUS_NOTE = (
     "The lookup already ran. He has heard one short line that you are checking. "
@@ -1837,10 +1841,37 @@ def choice_tools() -> list:
             },
         },
     }
-    return [web, qwen_tool()]
+    cursor = {
+        "type": "function",
+        "function": {
+            "name": "send_to_cursor",
+            "description": (
+                "Call only when he asked to start a code change, a test run, or other real work "
+                "for the coding agent. Do not call for a question, a lookup, or a story. "
+                "This does not start the work. It asks him to say yes."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "gist": {
+                        "type": "string",
+                        "description": "One plain sentence of the job, in his terms.",
+                    },
+                    "spoken_ack": {
+                        "type": "string",
+                        "description": "The confirmation he will hear. Include the job and ask him to say yes.",
+                    },
+                },
+                "required": ["gist", "spoken_ack"],
+            },
+        },
+    }
+    return [web, qwen_tool(), cursor]
 
 
 def accepted_call(name: str, args: dict) -> bool:
+    if name == "send_to_cursor":
+        return bool(str(args.get("gist") or "").strip())
     if name == "web_search":
         return bool(str(args.get("query") or "").strip())
     if name != "look_at_code":
@@ -1916,8 +1947,20 @@ def qwen_choice(user_text: str, content: str, brain: str, practice_slot: str):
     """Flash decides. Plus speaks only after a real tool call."""
     decider = "flash" if brain == "flash" else brain
     model = QWEN_MODELS.get(decider, QWEN_FLASH)
+    held = cursor_bridge.before_reply(user_text)
+    if held:
+        print(f"cursor gate {cursor_bridge.phase()}", flush=True)
+        yield {"type": "text", "text": held}
+        return
+    note = cursor_bridge.context_note()
     messages: list = [
-        {"role": "system", "content": system_prompt(user_text, decider, practice_slot) + "\n" + CHOICE_NOTE},
+        {
+            "role": "system",
+            "content": system_prompt(user_text, decider, practice_slot)
+            + "\n"
+            + CHOICE_NOTE
+            + (("\n" + note) if note else ""),
+        },
         *history[-16:],
         {"role": "user", "content": content},
     ]
@@ -1939,6 +1982,11 @@ def qwen_choice(user_text: str, content: str, brain: str, practice_slot: str):
         return
     name = chosen["name"]
     args = chosen["args"]
+    if name == "send_to_cursor":
+        line = cursor_bridge.propose(str(args.get("gist") or ""), user_text)
+        print(f"cursor propose {line[:160]!r}", flush=True)
+        yield {"type": "text", "text": line}
+        return
     clause = ack_clause(args)
     ack = {
         "type": "preface",
@@ -2759,6 +2807,9 @@ async def turn(request: Request):
                 yield from absorb(output_delta(event))
 
             if not turn_stopped(turn_id):
+                nudge = cursor_bridge.take_nudge()
+                if nudge:
+                    pending = (pending + " " + nudge).strip()
                 pieces, _rest = take_pieces(speakable(pending), final=True, first=not announced)
                 for piece in pieces:
                     yield from speak_piece(piece)
