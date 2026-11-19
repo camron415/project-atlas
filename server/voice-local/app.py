@@ -660,7 +660,7 @@ def current_status() -> str:
     if not CURRENT_STATUS.exists():
         return ""
     text = re.sub(r"\n{3,}", "\n\n", CURRENT_STATUS.read_text(errors="replace")).strip()
-    return text[:2400]
+    return text[:3600]
 
 
 def system_prompt(user_text: str, brain: str = "grok", practice_slot: str = "") -> str:
